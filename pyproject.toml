@@ -2,6 +2,8 @@
 name = "l6e"
 version = "0.1.0"
 description = "Pipeline-scoped model choice enforcement for AI agents."
+license = { text = "Apache-2.0" }
+license-files = ["LICEN[CS]E*"]
 requires-python = ">=3.11"
 dependencies = [
     "litellm>=1.0.0",
