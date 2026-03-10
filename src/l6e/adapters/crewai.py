@@ -1,9 +1,9 @@
 """CrewAI adapter for l6e — L6eStepCallback.
 
-No crewai import required. L6eStepCallback is a plain callable that CrewAI
-invokes after each agent step with a Union[AgentAction, AgentFinish] object
-(from langchain_core.agents). We do not inspect the step output — enforcement
-is based purely on the gate decision from PipelineContext.
+No crewai package import required. L6eStepCallback is a plain callable that
+CrewAI invokes via step_callback= after each agent step. l6e never imports
+crewai directly, so this adapter works regardless of which crewai version is
+installed or whether it is installed at all.
 
 Usage::
 

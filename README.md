@@ -201,4 +201,4 @@ Each record includes `model_requested`, `model_used`, `stage`, `prompt_complexit
 
 ## License
 
-MIT
+Apache 2.0
