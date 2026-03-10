@@ -1,0 +1,79 @@
+"""In-memory run store — tracks cost, reroutes, and savings for a single pipeline run."""
+from __future__ import annotations
+
+from l6e._protocols import ICostEstimator
+from l6e._types import CallRecord, PipelinePolicy, RunSummary
+
+
+class InMemoryRunStore:
+    """Implements IRunStore. Holds all CallRecords for one pipeline run in memory.
+
+    Injected with an ICostEstimator so it can compute the counterfactual cost
+    (what model_requested would have cost) when a call is rerouted to a cheaper
+    model — the delta becomes savings_usd in the RunSummary.
+    """
+
+    def __init__(
+        self,
+        run_id: str,
+        policy: PipelinePolicy,
+        estimator: ICostEstimator,
+    ) -> None:
+        self._run_id = run_id
+        self._policy = policy
+        self._estimator = estimator
+        self._records: list[CallRecord] = []
+        self._total_cost: float = 0.0
+        self._counterfactual_cost: float = 0.0
+
+    # --- IRunStore protocol ---
+
+    @property
+    def run_id(self) -> str:
+        return self._run_id
+
+    @property
+    def budget(self) -> float:
+        return self._policy.budget
+
+    def record_call(self, record: CallRecord) -> None:
+        self._records.append(record)
+        self._total_cost += record.cost_usd
+
+        if record.rerouted and record.model_requested != record.model_used:
+            # Compute what the requested model would have cost at the same token counts.
+            counterfactual = self._estimator.estimate(
+                model=record.model_requested,
+                prompt_tokens=record.prompt_tokens,
+                completion_tokens=record.completion_tokens,
+            )
+            # If estimator returns 0 (unknown model), fall back to actual cost — no savings.
+            self._counterfactual_cost += max(counterfactual, record.cost_usd)
+        else:
+            self._counterfactual_cost += record.cost_usd
+
+    def spent(self) -> float:
+        return self._total_cost
+
+    def remaining(self) -> float:
+        return self._policy.budget - self._total_cost
+
+    def call_count(self) -> int:
+        return len(self._records)
+
+    def to_summary(self) -> RunSummary:
+        reroutes = sum(1 for r in self._records if r.rerouted)
+        savings = max(0.0, self._counterfactual_cost - self._total_cost)
+        return RunSummary(
+            run_id=self._run_id,
+            policy=self._policy,
+            total_cost=self._total_cost,
+            calls_made=len(self._records),
+            reroutes=reroutes,
+            savings_usd=savings,
+            records=tuple(self._records),
+        )
+
+    def export(self) -> RunSummary:
+        """Cloud telemetry seam — identical to to_summary() in OSS."""
+        return self.to_summary()

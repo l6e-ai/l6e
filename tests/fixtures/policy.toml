@@ -1,0 +1,16 @@
+# l6e-policy.toml — test fixture for PipelinePolicy.from_toml()
+
+[policy]
+budget = 0.50
+budget_mode = "reroute"
+on_budget_exceeded = "partial"
+reroute_threshold = 0.75
+
+[stage_routing]
+retrieval     = "cloud_standard"
+summarization = "local"
+reasoning     = "cloud_frontier"
+formatting    = "local"
+
+[stage_overrides]
+final_reasoning = "halt"
