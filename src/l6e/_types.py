@@ -129,6 +129,18 @@ class CallRecord:
     stage: str | None = None
     prompt_complexity: PromptComplexity | None = None
     is_multi_turn: bool = False
+    actor_type: str = "parent_agent"
+    actor_id: str | None = None
+    actor_name: str | None = None
+    parent_call_id: str | None = None
+
+
+@dataclass(frozen=True)
+class SubagentSpend:
+    actor_id: str
+    actor_name: str | None
+    calls_made: int
+    total_cost_usd: float
 
 
 @dataclass(frozen=True)
@@ -141,3 +153,6 @@ class RunSummary:
     savings_usd: float
     records: tuple[CallRecord, ...]
     source: str = "pipeline"  # "mcp" for MCP session runs
+    subagent_calls: int = 0
+    subagent_spend_usd: float = 0.0
+    subagents: tuple[SubagentSpend, ...] = ()

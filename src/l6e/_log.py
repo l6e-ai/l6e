@@ -18,6 +18,7 @@ from l6e._types import (
     PipelinePolicy,
     PromptComplexity,
     RunSummary,
+    SubagentSpend,
     StageRoutingHint,
 )
 
@@ -63,6 +64,7 @@ class LocalRunLog:
 def _summary_from_dict(d: dict) -> RunSummary:  # type: ignore[type-arg]
     policy = _policy_from_dict(d["policy"])
     records = tuple(_record_from_dict(r) for r in d.get("records", []))
+    subagents = tuple(_subagent_from_dict(s) for s in d.get("subagents", []))
     return RunSummary(
         run_id=d["run_id"],
         policy=policy,
@@ -72,6 +74,9 @@ def _summary_from_dict(d: dict) -> RunSummary:  # type: ignore[type-arg]
         savings_usd=float(d["savings_usd"]),
         records=records,
         source=d.get("source", "pipeline"),
+        subagent_calls=int(d.get("subagent_calls", 0)),
+        subagent_spend_usd=float(d.get("subagent_spend_usd", 0.0)),
+        subagents=subagents,
     )
 
 
@@ -115,4 +120,19 @@ def _record_from_dict(d: dict) -> CallRecord:  # type: ignore[type-arg]
         stage=stage,
         prompt_complexity=prompt_complexity,
         is_multi_turn=bool(d.get("is_multi_turn", False)),
+        actor_type=str(d.get("actor_type", "parent_agent") or "parent_agent"),
+        actor_id=str(d["actor_id"]) if d.get("actor_id") is not None else None,
+        actor_name=str(d["actor_name"]) if d.get("actor_name") is not None else None,
+        parent_call_id=(
+            str(d["parent_call_id"]) if d.get("parent_call_id") is not None else None
+        ),
+    )
+
+
+def _subagent_from_dict(d: dict) -> SubagentSpend:  # type: ignore[type-arg]
+    return SubagentSpend(
+        actor_id=str(d["actor_id"]),
+        actor_name=str(d["actor_name"]) if d.get("actor_name") is not None else None,
+        calls_made=int(d["calls_made"]),
+        total_cost_usd=float(d["total_cost_usd"]),
     )
