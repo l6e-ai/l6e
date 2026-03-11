@@ -119,7 +119,7 @@ def test_budget_pressure_warn_mode_allows_with_reason() -> None:
 
 
 def test_stage_routing_local_no_local_model_halts() -> None:
-    """stage_routing LOCAL but router returns None → halt."""
+    """stage_routing LOCAL but router returns None → halt with no_local_model reason."""
     policy = PipelinePolicy(
         budget=1.00,
         stage_routing={"extraction": StageRoutingHint.LOCAL},
@@ -129,6 +129,7 @@ def test_stage_routing_local_no_local_model_halts() -> None:
     decision = check(gate, store, stage="extraction")
 
     assert decision.action == "halt"
+    assert "no_local_model" in decision.reason
 
 
 def test_stage_none_falls_through_to_budget_pressure() -> None:
@@ -214,13 +215,14 @@ def test_stage_routing_cloud_standard_allows() -> None:
 
 
 def test_budget_pressure_reroute_mode_no_local_halts() -> None:
-    """Budget pressure REROUTE but no local model → halt."""
+    """Budget pressure REROUTE but no local model → halt with no_local_model reason."""
     policy = PipelinePolicy(budget=1.00, budget_mode=BudgetMode.REROUTE)
     gate = make_gate(policy, FakeRouter(model=None))
     store = FakeStore(budget=1.00, spent_amount=0.85)
     decision = check(gate, store)
 
     assert decision.action == "halt"
+    assert "no_local_model" in decision.reason
 
 
 def test_exact_threshold_triggers_pressure() -> None:

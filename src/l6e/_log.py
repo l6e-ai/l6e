@@ -71,6 +71,7 @@ def _summary_from_dict(d: dict) -> RunSummary:  # type: ignore[type-arg]
         reroutes=int(d["reroutes"]),
         savings_usd=float(d["savings_usd"]),
         records=records,
+        source=d.get("source", "pipeline"),
     )
 
 

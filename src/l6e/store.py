@@ -1,4 +1,18 @@
-"""In-memory run store — tracks cost, reroutes, and savings for a single pipeline run."""
+"""In-memory run store for l6e budget enforcement.
+
+``InMemoryRunStore`` implements ``IRunStore`` and holds all ``CallRecord``
+objects for one pipeline run entirely in memory. It tracks cumulative spend,
+computes counterfactual costs when calls are rerouted to cheaper models, and
+produces a ``RunSummary`` at the end of the run.
+
+**source field and MCP tracking**
+
+The ``source`` constructor parameter identifies the origin of the run. It
+defaults to ``"pipeline"`` for direct SDK usage. The l6e MCP server sets it
+to ``"mcp"`` when a session is started via the ``l6e_session_start`` tool, so
+that runs initiated through MCP tool calls can be distinguished from SDK-driven
+runs in ``runs.jsonl`` and any downstream analytics.
+"""
 from __future__ import annotations
 
 from l6e._protocols import ICostEstimator
@@ -18,10 +32,12 @@ class InMemoryRunStore:
         run_id: str,
         policy: PipelinePolicy,
         estimator: ICostEstimator,
+        source: str = "pipeline",
     ) -> None:
         self._run_id = run_id
         self._policy = policy
         self._estimator = estimator
+        self._source = source
         self._records: list[CallRecord] = []
         self._total_cost: float = 0.0
         self._counterfactual_cost: float = 0.0
@@ -56,6 +72,7 @@ class InMemoryRunStore:
         return self._total_cost
 
     def remaining(self) -> float:
+        """Return the remaining budget in USD (budget minus total cost so far)."""
         return self._policy.budget - self._total_cost
 
     def call_count(self) -> int:
@@ -72,6 +89,7 @@ class InMemoryRunStore:
             reroutes=reroutes,
             savings_usd=savings,
             records=tuple(self._records),
+            source=self._source,
         )
 
     def export(self) -> RunSummary:

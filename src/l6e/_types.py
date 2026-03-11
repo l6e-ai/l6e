@@ -51,6 +51,7 @@ class PipelinePolicy:
     fallback_result: str | None = None
     latency_sla: float | None = None
     reroute_threshold: float = 0.8
+    unknown_model_cost_per_1k_tokens: float = 0.01
     stage_routing: dict[str, StageRoutingHint] = field(default_factory=dict)
     stage_overrides: dict[str, BudgetMode] = field(default_factory=dict)
 
@@ -83,6 +84,9 @@ class PipelinePolicy:
             latency_sla=policy_section.get("latency_sla"),
             reroute_threshold=float(
                 policy_section.get("reroute_threshold", 0.8)
+            ),
+            unknown_model_cost_per_1k_tokens=float(
+                policy_section.get("unknown_model_cost_per_1k_tokens", 0.01)
             ),
             stage_routing=stage_routing,
             stage_overrides=stage_overrides,
@@ -136,3 +140,4 @@ class RunSummary:
     reroutes: int
     savings_usd: float
     records: tuple[CallRecord, ...]
+    source: str = "pipeline"  # "mcp" for MCP session runs

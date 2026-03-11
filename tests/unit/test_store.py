@@ -188,3 +188,20 @@ def test_to_summary_calls_made(store) -> None:
     for i in range(5):
         store.record_call(make_record(call_index=i))
     assert store.to_summary().calls_made == 5
+
+
+def test_to_summary_source_defaults_to_pipeline(store) -> None:
+    assert store.to_summary().source == "pipeline"
+
+
+def test_to_summary_source_mcp_when_specified() -> None:
+    from l6e.store import InMemoryRunStore
+    from tests.conftest import FakeCostEstimator
+
+    mcp_store = InMemoryRunStore(
+        run_id="mcp-run",
+        policy=make_policy(budget=1.00),
+        estimator=FakeCostEstimator(),
+        source="mcp",
+    )
+    assert mcp_store.to_summary().source == "mcp"

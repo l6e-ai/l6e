@@ -174,9 +174,38 @@ class PipelineContext:
     ) -> object:
         """Advise on model, execute fn, record response.
 
-        allow   → fn(model, messages)
-        reroute → fn(decision.target_model, messages), rerouted=True in record
-        halt    → behaviour determined by policy.on_budget_exceeded
+        Runs the full gate-advise → execute → record cycle in one call.
+        This is the primary entry point for adapters that want automatic
+        budget enforcement without manually calling ``advise`` and ``record``.
+
+        Gate actions:
+
+        - **allow** — calls ``fn(model, messages)`` unchanged.
+        - **reroute** — calls ``fn(decision.target_model, messages)``; the
+          ``CallRecord`` marks ``rerouted=True`` so savings are tracked.
+        - **halt** — does *not* call ``fn``; behaviour is determined by
+          ``policy.on_budget_exceeded`` (raise, return fallback, return empty).
+
+        Args:
+            fn: Callable that accepts ``(model, messages)`` and returns a
+                response object understood by ``extract_token_usage``.
+            model: The model the caller *wants* to use.  The gate may
+                substitute a cheaper local model on reroute.
+            messages: OpenAI-style chat messages list.  User-role content is
+                extracted to estimate prompt tokens for the gate decision.
+            stage: Optional pipeline stage label (e.g. ``"draft"``,
+                ``"review"``).  Passed through to the gate and ``CallRecord``.
+            complexity: Pre-computed prompt complexity.  When ``None`` the
+                classifier derives it from the first user message.
+
+        Returns:
+            The raw response object returned by ``fn``, or the policy's
+            fallback value when the gate halts and ``on_budget_exceeded``
+            is not ``RAISE``.
+
+        Raises:
+            BudgetExceeded: If the gate halts and
+                ``policy.on_budget_exceeded == OnBudgetExceeded.RAISE``.
         """
         prompts = [m.get("content", "") for m in messages if m.get("role") == "user"]
         if not prompts:
@@ -228,6 +257,7 @@ def pipeline(
     policy: PipelinePolicy,
     log_path: Path | None = None,
     router: object | None = None,
+    source: str = "pipeline",
 ) -> PipelineContext:
     """Construct a fully-wired PipelineContext with default concrete collaborators.
 
@@ -239,16 +269,20 @@ def pipeline(
                   Defaults to ``LocalRouter`` (hardware-aware Ollama detection).
                   Pass a test double here to control routing in notebooks or tests
                   without touching any other part of the pipeline.
+        source:   Origin of the run — ``"pipeline"`` for OSS runs, ``"mcp"`` for
+                  MCP session runs. Written to ``RunSummary.source`` in the log.
     """
     from l6e.costs import LiteLLMCostEstimator
     from l6e.gate import ConstraintGate
     from l6e.router import LocalRouter
     from l6e.store import InMemoryRunStore
 
-    estimator = LiteLLMCostEstimator()
+    estimator = LiteLLMCostEstimator(
+        fallback_cost_per_1k_tokens=policy.unknown_model_cost_per_1k_tokens
+    )
     effective_router = router if router is not None else LocalRouter()
     gate = ConstraintGate(policy=policy, router=effective_router)
-    store = InMemoryRunStore(run_id=run_id, policy=policy, estimator=estimator)
+    store = InMemoryRunStore(run_id=run_id, policy=policy, estimator=estimator, source=source)
     log = LocalRunLog(path=log_path) if log_path is not None else LocalRunLog()
     classifier = PromptComplexityClassifier()
 
