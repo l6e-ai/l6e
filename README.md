@@ -1,5 +1,9 @@
 # l6e
 
+[![pytest](https://github.com/l6e-ai/l6e/actions/workflows/pytest.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/pytest.yml)
+[![mypy](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml)
+[![ruff](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml)
+
 **Pipeline-scoped model choice enforcement for AI agents.**
 
 Your agent pipeline doesn't know how much it costs. LiteLLM and Portkey enforce budgets per API key or per user — not per pipeline run. There's no way to say "this CrewAI crew gets $0.50 for this run, reroute to local models when it's running low."
