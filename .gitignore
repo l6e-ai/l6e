@@ -3,4 +3,6 @@ build/
 dist/
 *.egg-info/
 .venv*/
-
+.ruff_cache/
+.mypy_cache/
+.l6e/
