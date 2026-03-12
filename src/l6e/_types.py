@@ -171,3 +171,6 @@ class RunSummary:
     subagent_calls: int = 0
     subagent_spend_usd: float = 0.0
     subagents: tuple[SubagentSpend, ...] = ()
+    overhead_usd: float = 0.0
+    overhead_calls: int = 0
+    net_savings_usd: float = 0.0

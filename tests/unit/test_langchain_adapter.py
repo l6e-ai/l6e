@@ -50,9 +50,9 @@ def make_ctx(
     )
 
 
-def make_handler(ctx: PipelineContext):
+def make_handler(ctx: PipelineContext, *, infer_stage: bool = True):
     from l6e.adapters.langchain import L6eCallbackHandler
-    return L6eCallbackHandler(ctx)
+    return L6eCallbackHandler(ctx, infer_stage=infer_stage)
 
 
 def _run_id() -> UUID:
@@ -97,7 +97,7 @@ def test_on_llm_start_extracts_stage_from_tags() -> None:
 def test_on_llm_start_no_stage_tag_passes_none() -> None:
     spy = SpyGate(_ALLOW)
     ctx = make_ctx(gate=spy)
-    handler = make_handler(ctx)
+    handler = make_handler(ctx, infer_stage=False)
     handler.on_llm_start(_SERIALIZED, _PROMPTS, run_id=_run_id(), tags=["unrelated"])
     assert spy.last_stage is None
 
@@ -105,7 +105,7 @@ def test_on_llm_start_no_stage_tag_passes_none() -> None:
 def test_on_llm_start_no_tags_kwarg_passes_none() -> None:
     spy = SpyGate(_ALLOW)
     ctx = make_ctx(gate=spy)
-    handler = make_handler(ctx)
+    handler = make_handler(ctx, infer_stage=False)
     handler.on_llm_start(_SERIALIZED, _PROMPTS, run_id=_run_id())
     assert spy.last_stage is None
 

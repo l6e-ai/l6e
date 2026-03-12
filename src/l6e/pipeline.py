@@ -13,7 +13,7 @@ from typing import Literal
 
 from l6e._classify import PromptComplexityClassifier
 from l6e._log import LocalRunLog
-from l6e._protocols import IConstraintGate, ICostEstimator, IRunStore
+from l6e._protocols import IConstraintGate, ICostEstimator, ILocalRouter, IRunStore
 from l6e._response import extract_token_usage
 from l6e._types import (
     BudgetStatus,
@@ -256,7 +256,7 @@ def pipeline(
     run_id: str,
     policy: PipelinePolicy,
     log_path: Path | None = None,
-    router: object | None = None,
+    router: ILocalRouter | None = None,
     source: str = "pipeline",
 ) -> PipelineContext:
     """Construct a fully-wired PipelineContext with default concrete collaborators.
