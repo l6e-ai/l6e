@@ -1,0 +1,87 @@
+name: Publish l6e to PyPI
+
+on:
+  push:
+    tags:
+      - 'l6e/v*'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build-and-publish:
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/l6e/
+    permissions:
+      id-token: write # required for trusted publishing via PyPI
+
+    defaults:
+      run:
+        working-directory: ./l6e
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.13'
+
+      - name: Extract version from pyproject.toml
+        id: version
+        run: |
+          VERSION=$(python - <<'PY'
+          import tomllib
+          with open('pyproject.toml','rb') as f:
+              data = tomllib.load(f)
+          print((data.get('tool',{}).get('poetry',{}) or {}).get('version') or data.get('project',{}).get('version') or '')
+          PY
+          )
+          if [ -z "$VERSION" ]; then
+            echo 'Version not found in pyproject.toml' >&2
+            exit 1
+          fi
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+
+      - name: Verify tag matches version
+        if: github.event_name != 'workflow_dispatch'
+        run: |
+          TAG="${GITHUB_REF_NAME}"
+          # Strip the "l6e/" package prefix, then strip any pre-release suffix
+          EXPECTED="v${{ steps.version.outputs.version }}"
+          EXPECTED_TRIMMED=$(echo "$EXPECTED" | sed 's/-.*//')
+          TAG_TRIMMED=$(echo "$TAG" | sed 's|^l6e/||' | sed 's/-.*//')
+          echo "Tag: $TAG_TRIMMED; Expected: $EXPECTED_TRIMMED"
+          if [ "$TAG_TRIMMED" != "$EXPECTED_TRIMMED" ]; then
+            echo 'Tag does not match version. Aborting.' >&2
+            exit 1
+          fi
+
+      - name: Install build tooling
+        run: |
+          python -m pip install --upgrade pip
+          pip install build twine
+
+      - name: Build sdist and wheel
+        run: python -m build --sdist --wheel --outdir dist/
+
+      - name: Twine check dist artifacts
+        run: twine check dist/*
+
+      - name: Smoke test install
+        run: |
+          python -m venv .venv_test
+          source .venv_test/bin/activate
+          python -m pip install --upgrade pip
+          pip install dist/*.whl
+          python -c "import l6e, sys; print(l6e.__file__)"
+
+      - name: Publish package distributions to PyPI
+        uses: pypa/gh-action-pypi-publish@release/v1
+        with:
+          packages-dir: l6e/dist/
+          verify-metadata: true

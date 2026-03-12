@@ -1,4 +1,4 @@
-"""Unit tests for costs.py — LiteLLMCostEstimator."""
+"""Unit tests for costs.py — LiteLLMCostEstimator and resolve_model_id."""
 from __future__ import annotations
 
 import warnings
@@ -123,6 +123,7 @@ def test_estimate_with_metadata_known_model() -> None:
     assert meta.pricing_confidence == "high"
     assert meta.pricing_source == "litellm_table"
     assert meta.warning is None
+    assert meta.resolved_model is None
 
 
 def test_estimate_with_metadata_unknown_model_marks_low_confidence() -> None:
@@ -140,3 +141,75 @@ def test_estimate_with_metadata_unknown_model_marks_low_confidence() -> None:
     assert meta.pricing_confidence == "low"
     assert meta.pricing_source == "fallback_rate"
     assert meta.warning is not None
+    assert meta.resolved_model is None
+
+
+# ---------------------------------------------------------------------------
+# resolve_model_id — unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_resolve_model_id_claude_sonnet_46_variants() -> None:
+    """Vendor-internal Cursor suffixes resolve to the bare LiteLLM key."""
+    from l6e.costs import resolve_model_id
+
+    assert resolve_model_id("claude-4.6-sonnet-medium-thinking") == "claude-sonnet-4-6"
+    assert resolve_model_id("claude-4.6-sonnet-large") == "claude-sonnet-4-6"
+    assert resolve_model_id("claude-4.6-sonnet") == "claude-sonnet-4-6"
+
+
+def test_resolve_model_id_claude_sonnet_45() -> None:
+    from l6e.costs import resolve_model_id
+
+    assert resolve_model_id("claude-4.5-sonnet-medium") == "claude-sonnet-4-5"
+
+
+def test_resolve_model_id_claude_opus_46() -> None:
+    from l6e.costs import resolve_model_id
+
+    assert resolve_model_id("claude-opus-4-6-thinking") == "claude-opus-4-6"
+
+
+def test_resolve_model_id_gpt4o_variants() -> None:
+    from l6e.costs import resolve_model_id
+
+    assert resolve_model_id("gpt-4o-medium") == "gpt-4o"
+    assert resolve_model_id("gpt-4o-large") == "gpt-4o"
+
+
+def test_resolve_model_id_returns_none_for_unrecognisable() -> None:
+    from l6e.costs import resolve_model_id
+
+    assert resolve_model_id("totally-unknown-model-xyz-999") is None
+
+
+def test_estimator_resolves_vendor_model_id() -> None:
+    """Estimator silently resolves a vendor ID and returns high-confidence cost."""
+    from l6e.costs import LiteLLMCostEstimator
+
+    estimator = LiteLLMCostEstimator()
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        meta = estimator.estimate_with_metadata(
+            model="claude-4.6-sonnet-medium-thinking",
+            prompt_tokens=1000,
+            completion_tokens=500,
+        )
+    assert meta.model_pricing_known is True
+    assert meta.pricing_confidence == "high"
+    assert meta.pricing_source == "litellm_table_resolved"
+    assert meta.resolved_model == "claude-sonnet-4-6"
+    assert meta.warning is None
+    assert len(w) == 0, "no warning should be emitted for a successfully resolved model"
+
+
+def test_estimator_resolved_cost_is_nonzero() -> None:
+    from l6e.costs import LiteLLMCostEstimator
+
+    estimator = LiteLLMCostEstimator()
+    cost = estimator.estimate(
+        model="claude-4.6-sonnet-medium-thinking",
+        prompt_tokens=1000,
+        completion_tokens=500,
+    )
+    assert cost > 0.0
