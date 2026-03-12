@@ -9,13 +9,13 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ## [0.1.0] — 2026-03-10
 
-Initial release. Pipeline-scoped budget enforcement for AI agents.
+Initial release. Per-run budget enforcement and model routing for AI agent pipelines.
 
-### Core enforcement runtime
+### Core runtime
 
-- **`PipelineContext`** — the central object for a single pipeline run. Wires together the constraint gate, run store, cost estimator, prompt classifier, local router, and run log. Constructed via the `pipeline()` factory.
-- **`pipeline(run_id, policy, log_path=None, router=None)`** — context manager factory. Automatically writes a `RunSummary` to `.l6e/runs.jsonl` on exit, whether the run completes or raises. `log_path` and `router` can be overridden for testing.
-- **`ctx.call(fn, model, messages, stage)`** — the primary integration point. Runs advise → execute → record in one call. On allow, calls `fn(model, messages)`. On reroute, calls `fn(local_model, messages)` and marks `rerouted=True` in the record. On halt, behaviour is determined by `policy.on_budget_exceeded`.
+- **`PipelineContext`** — central object for a single pipeline run. Constructed via the `pipeline()` factory.
+- **`pipeline(run_id, policy, log_path=None, router=None)`** — context manager factory. Automatically writes a `RunSummary` to `.l6e/runs.jsonl` on exit, whether the run completes or raises.
+- **`ctx.call(fn, model, messages, stage)`** — primary integration point. Runs advise → execute → record in one call. On allow, calls `fn(model, messages)`. On reroute, calls `fn(local_model, messages)` and marks `rerouted=True` in the record. On halt, behaviour is determined by `policy.on_budget_exceeded`.
 - **`ctx.advise(model, prompts, stage)`** — gate check only, without executing. Returns a `GateDecision`.
 - **`ctx.record(...)`** — manually record a completed call for cases where `ctx.call()` isn't used.
 - **`ctx.budget_status()`** — returns a `BudgetStatus` snapshot (zero tokens, pure arithmetic). Available at any point mid-run.
@@ -32,7 +32,7 @@ Initial release. Pipeline-scoped budget enforcement for AI agents.
 - **`CallRecord`** — per-call telemetry: `model_requested`, `model_used`, `stage`, `prompt_complexity`, token counts, `cost_usd`, `rerouted`, `elapsed_ms`, `is_multi_turn`.
 - **`RunSummary`** — full run record: `run_id`, `policy`, `total_cost`, `calls_made`, `reroutes`, `savings_usd`, all `CallRecord`s.
 
-### Constraint gate (`gate.py`)
+### Constraint gate
 
 Pure decision logic with no side effects. Priority order for each call:
 
@@ -44,7 +44,7 @@ Pure decision logic with no side effects. Priority order for each call:
 
 On reroute: calls `router.best_local_model()`. If no local model is available, falls back to halt.
 
-### Local router (`router.py`)
+### Local router
 
 - Hardware-aware Ollama detection via `l6e_forge` (optional dependency).
 - On first call to `best_local_model()`, imports `l6e_forge.models.auto`, calls `get_system_profile()`, then `suggest_models()`. Returns `None` immediately if `l6e_forge` is not installed, if the import fails, or if `profile.has_ollama` is false.
@@ -52,20 +52,19 @@ On reroute: calls `router.best_local_model()`. If no local model is available, f
 - Result is cached after first call — hardware doesn't change mid-run.
 - When `best_local_model()` returns `None`, the gate falls back to halt regardless of the reroute intent.
 
-### Prompt complexity classifier (`_classify.py`)
+### Prompt complexity classifier
 
 - Classifies prompt complexity as `LOW`, `MEDIUM`, or `HIGH` using structural heuristics only — no model, no network call, ~2ms.
 - Stage name short-circuit (checked before content): LOW stages: `formatting`, `format`, `extraction`, `extract`, `retrieval`, `retrieve`, `translation`, `translate`, `listing`. HIGH stages: `reasoning`, `final_reasoning`, `synthesis`, `synthesize`, `analysis`, `analyze`, `evaluation`, `evaluate`.
 - Content score: low-complexity first word (`summarize`, `extract`, `format`, `translate`, `list`, `transcribe`, `convert`, `reformat`, `enumerate`) → -2; high placeholder/template density → -1; short prompt (<200 chars) → -1; long prompt (>2000 chars) → +1; reasoning keywords (`analyze`, `compare`, `evaluate`, `synthesize`, `critique`, `assess`, `contrast`, `argue`, `reason`) → up to +2; multi-step pattern (`Step 1:`, `firstly…then`, numbered list) → +2; more than 2 question marks → +1. Score ≥ 2 → HIGH, ≤ -2 → LOW, otherwise MEDIUM.
 - Used by `L6eCallbackHandler` to auto-infer stage when no `l6e_stage:` tag is present (LOW → `"retrieval"`, MEDIUM → `"formatting"`, HIGH → `"reasoning"`).
-- Populates `CallRecord.prompt_complexity` for future Pro profiling.
+- Populates `CallRecord.prompt_complexity`.
 
-### Run log (`_log.py`)
+### Run log
 
 - Appends every `RunSummary` to `.l6e/runs.jsonl` on `PipelineContext.__exit__` — always, even if the run raised an exception.
 - Creates `.l6e/` directory if it doesn't exist.
 - `read_recent(n)` reads back the last `n` summaries from the tail of the file.
-- The JSONL file is the data source for the Pro profiling layer: every run since install is immediately available when a developer upgrades.
 
 ### Adapters
 
@@ -84,7 +83,7 @@ On reroute: calls `router.best_local_model()`. If no local model is available, f
 - **CrewAI reroute is advisory.** Allow and reroute both let the step proceed; enforcement is budget halt only.
 - **Latency SLA not enforced.** `LatencySLAExceeded` is defined, `latency_sla` is accepted in `PipelinePolicy`, but the exception is never raised in v0.1.
 - **Local router requires `l6e_forge`.** Without it, `best_local_model()` returns `None` and any reroute attempt falls back to halt.
-- **`quality_safe_to_reroute` is always `None`** in the OSS runtime. Populated by the Pro Task Classification Tuner.
+- **`quality_safe_to_reroute` is always `None`** in v0.1.
 
 ---
 
@@ -94,13 +93,12 @@ On reroute: calls `router.best_local_model()`. If no local model is available, f
 
 - Latency SLA enforcement (`LatencySLAExceeded` raised when wall time exceeds `policy.latency_sla`)
 - CrewAI per-step model injection (hard reroute, not advisory)
-- MCP server interface: `l6e_pipeline_start`, `l6e_checkpoint`, `l6e_pipeline_end`, `l6e_spend` tools for any MCP-compatible client (Claude Code, Cursor, raw agent loops)
 
 ### Pro layer (waitlist)
 
 - Pipeline profiler — reads `.l6e/runs.jsonl` history to generate optimized `PipelinePolicy` configs
-- Task Classification Tuner — calibrates stage routing thresholds to your actual workloads; populates `quality_safe_to_reroute`
-- Budget Envelope Recommender — suggests per-pipeline budget limits from real cost distributions
+- Stage routing calibration — tunes routing thresholds to your actual workloads
+- Budget envelope recommendations from real cost distributions
 - Spend analytics across all runs and engineers
 - Anomaly detection and drift alerts
 

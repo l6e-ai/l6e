@@ -5,13 +5,13 @@
 [![mypy](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml)
 [![ruff](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml)
 
-**Pipeline-scoped model choice enforcement for AI agents.**
+**Per-run budget enforcement and model routing for AI agent pipelines.**
 
-Your agent pipeline doesn't know how much it costs. LiteLLM and Portkey enforce budgets per API key or per user — not per pipeline run. There's no way to say "this CrewAI crew gets $0.50 for this run, reroute to local models when it's running low."
+LiteLLM and Portkey enforce budgets per API key or per user — not per pipeline run. There's no way to say "this CrewAI crew gets $0.50 for this run, reroute to local models when it's running low."
 
-l6e fixes that. It sits between your orchestrator and your router, enforces a budget across the whole run, and automatically downgrades to cheaper model tiers before you overspend.
+l6e sits between your orchestrator and your router, enforces a budget across the whole run, and automatically routes to cheaper model tiers before you overspend.
 
-Looking for the MCP integration for Claude Code, Cursor, or other use? Check out [l6e-mcp (Apache 2.0)](https://github.com/l6e-ai/l6e-mcp?branch=main).
+Using Claude Code, Cursor, or another MCP client? Check out [l6e-mcp (Apache 2.0)](https://github.com/l6e-ai/l6e-mcp?branch=main).
 
 ---
 
@@ -165,7 +165,7 @@ Where l6e sits:
     │       ↓
     │   [l6e — knows pipeline budget, stage, quality constraints]
     │       ↓  advises model tier
-    │   LiteLLM / OpenAI SDK     ← executes the call l6e selected
+    │   LiteLLM / OpenAI SDK     ← routes/executes the call
     │       ↓
     │   GPT-4o-mini / Ollama / GPT-4o
     │
