@@ -195,3 +195,22 @@ def test_on_llm_end_reroute_records_target_model_as_model_used() -> None:
     assert record.model_requested == "gpt-4o"
     assert record.model_used == "ollama/qwen2.5:7b"
     assert record.rerouted is True
+
+
+# ---------------------------------------------------------------------------
+# ImportError guard — lines 14-15: langchain_core absent
+# ---------------------------------------------------------------------------
+
+
+def test_import_error_raised_when_langchain_core_absent(monkeypatch) -> None:
+    """Lines 14-15: importing the langchain adapter without langchain_core raises ImportError."""
+    import importlib
+    import sys
+
+    # Remove the cached module so the import guard runs fresh
+    monkeypatch.delitem(sys.modules, "l6e.adapters.langchain", raising=False)
+    monkeypatch.setitem(sys.modules, "langchain_core", None)  # type: ignore[arg-type]
+    monkeypatch.setitem(sys.modules, "langchain_core.callbacks", None)  # type: ignore[arg-type]
+
+    with pytest.raises(ImportError, match="langchain-core is required"):
+        importlib.import_module("l6e.adapters.langchain")

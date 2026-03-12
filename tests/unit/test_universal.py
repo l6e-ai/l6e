@@ -217,3 +217,30 @@ def test_call_with_stage_routing_local_reroutes() -> None:
     fn = make_fn()
     ctx.call(fn=fn, model="gpt-4o", messages=_MESSAGES, stage="summarization")
     assert fn.calls[0][0] == "ollama/qwen2.5:7b"  # type: ignore[attr-defined]
+
+
+# ---------------------------------------------------------------------------
+# adapters/universal.py — import coverage (lines 19-23, currently 0%)
+# ---------------------------------------------------------------------------
+
+
+def test_universal_adapter_exports_pipeline_context() -> None:
+    """Importing the universal adapter makes PipelineContext available there."""
+    from l6e.adapters.universal import PipelineContext as UniversalPipelineContext
+
+    assert UniversalPipelineContext is PipelineContext
+
+
+def test_universal_adapter_exports_pipeline_factory() -> None:
+    """Importing the universal adapter makes the pipeline() factory available."""
+    from l6e.adapters.universal import pipeline as universal_pipeline
+    from l6e.pipeline import pipeline as canonical_pipeline
+
+    assert universal_pipeline is canonical_pipeline
+
+
+def test_universal_adapter_all_contains_expected_names() -> None:
+    import l6e.adapters.universal as universal_mod
+
+    assert "PipelineContext" in universal_mod.__all__
+    assert "pipeline" in universal_mod.__all__

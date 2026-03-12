@@ -312,3 +312,71 @@ def test_call_returns_fallback_on_halt_with_fallback_mode() -> None:
     ctx = make_ctx(policy=policy, gate=FakeGate(_HALT))
     result = ctx.call(fn=lambda m, msgs: {}, model="gpt-4o", messages=[])
     assert result == "fallback-answer"
+
+
+# ---------------------------------------------------------------------------
+# _estimate_prompt_tokens tiktoken failure fallback (lines 38-39)
+# ---------------------------------------------------------------------------
+
+
+def test_estimate_prompt_tokens_fallback_when_tiktoken_fails(monkeypatch) -> None:
+    """Lines 38-39: if tiktoken raises, falls back to max(1, len(text) // 4)."""
+    import tiktoken
+
+    from l6e.pipeline import _estimate_prompt_tokens
+
+    def _raise(_name):
+        raise RuntimeError("no tiktoken")
+
+    monkeypatch.setattr(tiktoken, "get_encoding", _raise)
+
+    text = "hello world"
+    result = _estimate_prompt_tokens([text])
+    expected = max(1, len(text) // 4)
+    assert result == expected
+
+
+def test_estimate_prompt_tokens_fallback_minimum_is_one(monkeypatch) -> None:
+    """Even for an empty string, fallback returns at least 1."""
+    import tiktoken
+
+    from l6e.pipeline import _estimate_prompt_tokens
+
+    def _raise(_name):
+        raise RuntimeError("no tiktoken")
+
+    monkeypatch.setattr(tiktoken, "get_encoding", _raise)
+
+    result = _estimate_prompt_tokens([""])
+    assert result >= 1
+
+
+# ---------------------------------------------------------------------------
+# run_summary() (line 148)
+# ---------------------------------------------------------------------------
+
+
+def test_run_summary_returns_run_summary_with_correct_run_id() -> None:
+    from l6e._types import RunSummary
+
+    store = FakeStore(budget=1.00, spent_amount=0.0, run_id="my-run")
+    ctx = make_ctx(store=store)
+    summary = ctx.run_summary()
+    assert isinstance(summary, RunSummary)
+    assert summary.run_id == "my-run"
+
+
+def test_run_summary_reflects_recorded_calls() -> None:
+    from l6e._types import RunSummary
+
+    store = FakeStore(budget=1.00, spent_amount=0.0, run_id="run-x")
+    ctx = make_ctx(store=store)
+    ctx.record(
+        model_requested="gpt-4o",
+        model_used="gpt-4o",
+        response=_FAKE_RESPONSE,
+        elapsed_ms=100.0,
+    )
+    summary = ctx.run_summary()
+    assert isinstance(summary, RunSummary)
+    assert summary.calls_made == 1

@@ -103,3 +103,47 @@ class _FakeLLMResultZeroTokens:
 
 def test_langchain_llm_result_zero_token_counts() -> None:
     assert extract_token_usage(_FakeLLMResultZeroTokens()) == (0, 0)
+
+
+# ---------------------------------------------------------------------------
+# LangChain LLMResult — input_tokens/output_tokens fallback keys (lines 39, 42)
+# ---------------------------------------------------------------------------
+
+
+class _FakeLLMResultAnthropicKeys:
+    """LLMResult with Anthropic-style input_tokens/output_tokens inside token_usage."""
+    llm_output = {"token_usage": {"input_tokens": 55, "output_tokens": 25}}
+
+
+def test_langchain_llm_result_input_output_tokens_fallback() -> None:
+    """Lines 39 + 42: prompt_tokens absent → falls back to input_tokens/output_tokens."""
+    assert extract_token_usage(_FakeLLMResultAnthropicKeys()) == (55, 25)
+
+
+class _FakeLLMResultUsageAnthropicKeys:
+    """LLMResult using 'usage' key with Anthropic-style token names."""
+    llm_output = {"usage": {"input_tokens": 33, "output_tokens": 11}}
+
+
+def test_langchain_llm_result_usage_key_anthropic_fallback() -> None:
+    assert extract_token_usage(_FakeLLMResultUsageAnthropicKeys()) == (33, 11)
+
+
+# ---------------------------------------------------------------------------
+# tiktoken failure fallback (lines 70-71)
+# ---------------------------------------------------------------------------
+
+
+def test_plain_string_returns_zero_tuple_when_tiktoken_fails(monkeypatch) -> None:
+    """Lines 70-71: if tiktoken raises during string fallback, return (0, 0)."""
+    import l6e._response as response_mod
+
+    def failing_get_encoding(name: str):
+        raise RuntimeError("tiktoken unavailable")
+
+    # Patch tiktoken inside the module's namespace
+    import tiktoken
+    monkeypatch.setattr(tiktoken, "get_encoding", failing_get_encoding)
+
+    result = response_mod.extract_token_usage("some text that triggers tiktoken path")
+    assert result == (0, 0)
