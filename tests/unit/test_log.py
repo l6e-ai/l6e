@@ -13,6 +13,7 @@ from l6e._types import (
     PromptComplexity,
     RunSummary,
     StageRoutingHint,
+    SubagentSpend,
 )
 
 
@@ -190,3 +191,131 @@ def test_round_trip_call_records(tmp_path: Path) -> None:
     assert r.rerouted is True
     assert r.prompt_complexity == PromptComplexity.LOW
     assert r.stage == "retrieval"
+
+
+# ---------------------------------------------------------------------------
+# read_recent — blank-line skip (line 52)
+# ---------------------------------------------------------------------------
+
+
+def test_read_recent_skips_blank_lines(tmp_path: Path) -> None:
+    from l6e._log import LocalRunLog
+
+    log_path = tmp_path / ".l6e" / "runs.jsonl"
+    log = LocalRunLog(path=log_path)
+    log.append(make_summary(run_id="r1"))
+    log.append(make_summary(run_id="r2"))
+
+    # Inject blank lines between entries
+    content = log_path.read_text()
+    lines = content.strip().splitlines()
+    with log_path.open("w", encoding="utf-8") as f:
+        f.write(lines[0] + "\n\n\n" + lines[1] + "\n\n")
+
+    results = log.read_recent()
+    assert len(results) == 2
+    assert {r.run_id for r in results} == {"r1", "r2"}
+
+
+# ---------------------------------------------------------------------------
+# read_recent — bad JSON swallow (lines 55-56)
+# ---------------------------------------------------------------------------
+
+
+def test_read_recent_ignores_corrupt_json_lines(tmp_path: Path) -> None:
+    from l6e._log import LocalRunLog
+
+    log_path = tmp_path / ".l6e" / "runs.jsonl"
+    log = LocalRunLog(path=log_path)
+    log.append(make_summary(run_id="good"))
+
+    # Append a corrupt line after the valid one
+    with log_path.open("a", encoding="utf-8") as f:
+        f.write("this is not valid JSON\n")
+        f.write("{\"run_id\": \"also-broken\", truncated\n")
+
+    results = log.read_recent()
+    assert len(results) == 1
+    assert results[0].run_id == "good"
+
+
+def test_read_recent_handles_all_corrupt_lines_returns_empty(tmp_path: Path) -> None:
+    from l6e._log import LocalRunLog
+
+    log_path = tmp_path / ".l6e" / "runs.jsonl"
+    log_path.parent.mkdir(parents=True, exist_ok=True)
+    log_path.write_text("bad line\n{incomplete\n!!!\n", encoding="utf-8")
+
+    log = LocalRunLog(path=log_path)
+    results = log.read_recent()
+    assert results == []
+
+
+# ---------------------------------------------------------------------------
+# SubagentSpend round-trip (line 141 — _subagent_from_dict)
+# ---------------------------------------------------------------------------
+
+
+def test_round_trip_subagent_spend(tmp_path: Path) -> None:
+    from l6e._log import LocalRunLog
+
+    log = LocalRunLog(path=tmp_path / ".l6e" / "runs.jsonl")
+
+    subagent = SubagentSpend(
+        actor_id="agent-abc",
+        actor_name="research-agent",
+        calls_made=5,
+        total_cost_usd=0.042,
+    )
+    policy = PipelinePolicy(budget=1.0)
+    original = RunSummary(
+        run_id="subagent-run",
+        policy=policy,
+        total_cost=0.042,
+        calls_made=0,
+        reroutes=0,
+        savings_usd=0.0,
+        records=(),
+        subagent_calls=5,
+        subagent_spend_usd=0.042,
+        subagents=(subagent,),
+    )
+    log.append(original)
+
+    restored = log.read_recent(1)[0]
+    assert len(restored.subagents) == 1
+    sa = restored.subagents[0]
+    assert sa.actor_id == "agent-abc"
+    assert sa.actor_name == "research-agent"
+    assert sa.calls_made == 5
+    assert sa.total_cost_usd == pytest.approx(0.042)
+
+
+def test_round_trip_subagent_spend_actor_name_none(tmp_path: Path) -> None:
+    from l6e._log import LocalRunLog
+
+    log = LocalRunLog(path=tmp_path / ".l6e" / "runs.jsonl")
+
+    subagent = SubagentSpend(
+        actor_id="anon-agent",
+        actor_name=None,
+        calls_made=1,
+        total_cost_usd=0.001,
+    )
+    policy = PipelinePolicy(budget=1.0)
+    original = RunSummary(
+        run_id="anon-run",
+        policy=policy,
+        total_cost=0.001,
+        calls_made=0,
+        reroutes=0,
+        savings_usd=0.0,
+        records=(),
+        subagents=(subagent,),
+    )
+    log.append(original)
+
+    restored = log.read_recent(1)[0]
+    sa = restored.subagents[0]
+    assert sa.actor_name is None
+    assert sa.actor_id == "anon-agent"

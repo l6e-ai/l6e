@@ -119,3 +119,33 @@ def test_unknown_stage_high_content_returns_high(classifier) -> None:
     prompt = "Step 1: analyze. Step 2: compare. Step 3: synthesize and evaluate critically."
     result = classifier.classify(prompt, stage="my_custom_stage")
     assert result == PromptComplexity.HIGH
+
+
+# ---------------------------------------------------------------------------
+# High placeholder density branch (line 81) — score -= 1
+# ---------------------------------------------------------------------------
+
+
+def test_high_placeholder_density_decrements_score(classifier) -> None:
+    """Placeholder ratio > 0.15 should reduce score by 1.
+
+    Prompt: 4 placeholders across ~8 words → ratio = 0.5, well above 0.15.
+    Without the density penalty this neutral prompt would be MEDIUM;
+    with it the score tips to LOW (short prompt -1, density -1, starts with
+    non-low verb so no extra -2 → score = -2 → LOW).
+    """
+    # 8 words + 4 {placeholder} tokens → ratio 4/8 = 0.5 > 0.15
+    prompt = "Do {action} and {target} for <user> then <result>"
+    result = classifier.classify(prompt, stage=None)
+    # Score: -1 (short) + -1 (density) = -2 → LOW
+    assert result == PromptComplexity.LOW
+
+
+def test_placeholder_density_below_threshold_does_not_decrement(classifier) -> None:
+    """A prompt with sparse placeholders should NOT trigger the density penalty."""
+    # Long enough to avoid length penalty, only 1 placeholder in ~50 words
+    base = "Please carefully review the following document and provide a detailed assessment. "
+    prompt = base * 3 + "Focus on the {key_aspect} most relevant to the task."
+    result = classifier.classify(prompt, stage=None)
+    # Without density penalty, neutral/medium content — should not be artificially LOW
+    assert result in (PromptComplexity.MEDIUM, PromptComplexity.HIGH)
