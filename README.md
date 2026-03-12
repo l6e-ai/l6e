@@ -1,0 +1,54 @@
+# Repository Coverage
+
+[Full report](https://htmlpreview.github.io/?https://github.com/l6e-ai/l6e/blob/python-coverage-comment-action-data/htmlcov/index.html)
+
+| Name                             |    Stmts |     Miss |   Cover |   Missing |
+|--------------------------------- | -------: | -------: | ------: | --------: |
+| src/l6e/\_\_init\_\_.py          |        5 |        0 |    100% |           |
+| src/l6e/\_classify.py            |       43 |        1 |     98% |        81 |
+| src/l6e/\_log.py                 |       49 |        4 |     92% |52, 55-56, 141 |
+| src/l6e/\_protocols.py           |       20 |        0 |    100% |           |
+| src/l6e/\_response.py            |       48 |        4 |     92% |39, 42, 70-71 |
+| src/l6e/\_types.py               |      105 |        0 |    100% |           |
+| src/l6e/adapters/\_\_init\_\_.py |        0 |        0 |    100% |           |
+| src/l6e/adapters/crewai.py       |       12 |        0 |    100% |           |
+| src/l6e/adapters/langchain.py    |       59 |        2 |     97% |     14-15 |
+| src/l6e/adapters/universal.py    |        3 |        3 |      0% |     19-23 |
+| src/l6e/costs.py                 |       29 |        0 |    100% |           |
+| src/l6e/exceptions.py            |       12 |        3 |     75% |     21-23 |
+| src/l6e/gate.py                  |       45 |        0 |    100% |           |
+| src/l6e/pipeline.py              |       96 |        3 |     97% |38-39, 148 |
+| src/l6e/router.py                |       30 |       16 |     47% | 22, 41-68 |
+| src/l6e/store.py                 |       37 |        0 |    100% |           |
+| **TOTAL**                        |  **593** |   **36** | **94%** |           |
+
+
+## Setup coverage badge
+
+Below are examples of the badges you can use in your main branch `README` file.
+
+### Direct image
+
+[![Coverage badge](https://raw.githubusercontent.com/l6e-ai/l6e/python-coverage-comment-action-data/badge.svg)](https://htmlpreview.github.io/?https://github.com/l6e-ai/l6e/blob/python-coverage-comment-action-data/htmlcov/index.html)
+
+This is the one to use if your repository is private or if you don't want to customize anything.
+
+### [Shields.io](https://shields.io) Json Endpoint
+
+[![Coverage badge](https://img.shields.io/endpoint?url=https://raw.githubusercontent.com/l6e-ai/l6e/python-coverage-comment-action-data/endpoint.json)](https://htmlpreview.github.io/?https://github.com/l6e-ai/l6e/blob/python-coverage-comment-action-data/htmlcov/index.html)
+
+Using this one will allow you to [customize](https://shields.io/endpoint) the look of your badge.
+It won't work with private repositories. It won't be refreshed more than once per five minutes.
+
+### [Shields.io](https://shields.io) Dynamic Badge
+
+[![Coverage badge](https://img.shields.io/badge/dynamic/json?color=brightgreen&label=coverage&query=%24.message&url=https%3A%2F%2Fraw.githubusercontent.com%2Fl6e-ai%2Fl6e%2Fpython-coverage-comment-action-data%2Fendpoint.json)](https://htmlpreview.github.io/?https://github.com/l6e-ai/l6e/blob/python-coverage-comment-action-data/htmlcov/index.html)
+
+This one will always be the same color. It won't work for private repos. I'm not even sure why we included it.
+
+## What is that?
+
+This branch is part of the
+[python-coverage-comment-action](https://github.com/marketplace/actions/python-coverage-comment)
+GitHub Action. All the files in this branch are automatically generated and may be
+overwritten at any moment.
