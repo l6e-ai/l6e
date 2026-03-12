@@ -11,6 +11,8 @@ Your agent pipeline doesn't know how much it costs. LiteLLM and Portkey enforce 
 
 l6e fixes that. It sits between your orchestrator and your router, enforces a budget across the whole run, and automatically downgrades to cheaper model tiers before you overspend.
 
+Looking for the MCP integration for Claude Code, Cursor, or other use? Check out [l6e-mcp (Apache 2.0)](https://github.com/l6e-ai/l6e-mcp?branch=main).
+
 ---
 
 ## Install
