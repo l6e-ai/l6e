@@ -81,6 +81,7 @@ def _summary_from_dict(d: dict) -> RunSummary:  # type: ignore[type-arg]
         overhead_usd=float(d.get("overhead_usd", 0.0)),
         overhead_calls=int(d.get("overhead_calls", 0)),
         net_savings_usd=float(d.get("net_savings_usd", d.get("savings_usd", 0.0))),
+        savings_confidence=str(d.get("savings_confidence", "estimate_only")),
     )
 
 

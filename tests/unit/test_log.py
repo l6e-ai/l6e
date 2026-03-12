@@ -44,6 +44,7 @@ def make_summary(
         overhead_usd=0.01,
         overhead_calls=3,
         net_savings_usd=0.04,
+        savings_confidence="exact",
     )
 
 
@@ -145,6 +146,7 @@ def test_round_trip_basic_fields(tmp_path: Path) -> None:
     assert restored.overhead_usd == pytest.approx(original.overhead_usd)
     assert restored.overhead_calls == original.overhead_calls
     assert restored.net_savings_usd == pytest.approx(original.net_savings_usd)
+    assert restored.savings_confidence == original.savings_confidence
     assert restored.calls_made == original.calls_made
 
 
