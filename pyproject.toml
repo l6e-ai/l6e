@@ -1,7 +1,7 @@
 [project]
 name = "l6e"
-version = "0.1.0"
-description = "Pipeline-scoped model choice enforcement for AI agents."
+version = "0.1.1"
+description = "Per-run budget enforcement and model routing for AI agent pipelines."
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICEN[CS]E*"]
