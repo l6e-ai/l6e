@@ -20,6 +20,7 @@ from l6e._types import (
     RunSummary,
     SubagentSpend,
     StageRoutingHint,
+    UnknownModelPricingMode,
 )
 
 _DEFAULT_PATH = Path(".l6e/runs.jsonl")
@@ -99,6 +100,10 @@ def _policy_from_dict(d: dict) -> PipelinePolicy:  # type: ignore[type-arg]
         fallback_result=fallback_result,
         latency_sla=latency_sla,
         reroute_threshold=float(d.get("reroute_threshold", 0.8)),
+        unknown_model_cost_per_1k_tokens=float(d.get("unknown_model_cost_per_1k_tokens", 0.01)),
+        unknown_model_pricing_mode=UnknownModelPricingMode(
+            d.get("unknown_model_pricing_mode", UnknownModelPricingMode.WARN_ONLY)
+        ),
         stage_routing=stage_routing,
         stage_overrides=stage_overrides,
     )

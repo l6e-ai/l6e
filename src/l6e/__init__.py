@@ -20,6 +20,7 @@ from l6e._types import (
     PipelinePolicy,
     RunSummary,
     StageRoutingHint,
+    UnknownModelPricingMode,
 )
 from l6e.exceptions import BudgetExceeded, LatencySLAExceeded
 from l6e.pipeline import PipelineContext, pipeline
@@ -35,5 +36,6 @@ __all__ = [
     "PipelinePolicy",
     "OnBudgetExceeded",
     "StageRoutingHint",
+    "UnknownModelPricingMode",
 ]
 __version__ = "0.1.0"

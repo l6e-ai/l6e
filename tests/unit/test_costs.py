@@ -107,3 +107,36 @@ def test_estimator_handles_litellm_exception_fallback_disabled() -> None:
         with patch("litellm.cost_per_token", side_effect=Exception("boom")):
             cost = estimator.estimate(model="gpt-4o-mini", prompt_tokens=100, completion_tokens=50)
     assert cost == 0.0
+
+
+def test_estimate_with_metadata_known_model() -> None:
+    from l6e.costs import LiteLLMCostEstimator
+
+    estimator = LiteLLMCostEstimator()
+    meta = estimator.estimate_with_metadata(
+        model="gpt-4o-mini",
+        prompt_tokens=1000,
+        completion_tokens=500,
+    )
+    assert meta.cost_usd > 0.0
+    assert meta.model_pricing_known is True
+    assert meta.pricing_confidence == "high"
+    assert meta.pricing_source == "litellm_table"
+    assert meta.warning is None
+
+
+def test_estimate_with_metadata_unknown_model_marks_low_confidence() -> None:
+    from l6e.costs import LiteLLMCostEstimator
+
+    estimator = LiteLLMCostEstimator(fallback_cost_per_1k_tokens=0.01)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        meta = estimator.estimate_with_metadata(
+            model="not-a-real-model-xyz-999",
+            prompt_tokens=100,
+            completion_tokens=50,
+        )
+    assert meta.model_pricing_known is False
+    assert meta.pricing_confidence == "low"
+    assert meta.pricing_source == "fallback_rate"
+    assert meta.warning is not None

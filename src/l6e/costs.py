@@ -1,9 +1,20 @@
 """LiteLLM-backed cost estimator."""
 from __future__ import annotations
 
+from dataclasses import dataclass
+from typing import Literal
 import warnings
 
 import litellm
+
+
+@dataclass(frozen=True)
+class CostEstimateMetadata:
+    cost_usd: float
+    pricing_confidence: Literal["high", "low"]
+    pricing_source: str
+    warning: str | None
+    model_pricing_known: bool
 
 
 class LiteLLMCostEstimator:
@@ -26,24 +37,58 @@ class LiteLLMCostEstimator:
         Returns 0.0 (or the configured fallback rate) for unknown models.
         Always emits a warning when the model is not recognised by litellm.
         """
+        return self.estimate_with_metadata(
+            model=model,
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+        ).cost_usd
+
+    def estimate_with_metadata(
+        self,
+        model: str,
+        prompt_tokens: int,
+        completion_tokens: int,
+        *,
+        emit_warning: bool = True,
+    ) -> CostEstimateMetadata:
+        """Return estimated cost and confidence metadata."""
         try:
             prompt_cost, completion_cost = litellm.cost_per_token(
                 model=model,
                 prompt_tokens=prompt_tokens,
                 completion_tokens=completion_tokens,
             )
-            return prompt_cost + completion_cost
+            return CostEstimateMetadata(
+                cost_usd=prompt_cost + completion_cost,
+                pricing_confidence="high",
+                pricing_source="litellm_table",
+                warning=None,
+                model_pricing_known=True,
+            )
         except Exception:
-            warnings.warn(
+            warning = (
                 f"l6e: unknown model '{model}' — cost cannot be estimated from litellm's "
                 f"table. Falling back to {self._fallback_cost_per_1k:.4f} USD/1k tokens. "
                 "Set PipelinePolicy.unknown_model_cost_per_1k_tokens (or "
                 "'unknown_model_cost_per_1k_tokens' in [policy] of your l6e TOML) to "
                 "the correct rate for this model, or to 0.0 to disable enforcement for "
-                "unknown models.",
-                stacklevel=2,
+                "unknown models."
             )
+            if emit_warning:
+                warnings.warn(warning, stacklevel=2)
             if self._fallback_cost_per_1k > 0:
                 total_tokens = prompt_tokens + completion_tokens
-                return total_tokens / 1000.0 * self._fallback_cost_per_1k
-            return 0.0
+                return CostEstimateMetadata(
+                    cost_usd=total_tokens / 1000.0 * self._fallback_cost_per_1k,
+                    pricing_confidence="low",
+                    pricing_source="fallback_rate",
+                    warning=warning,
+                    model_pricing_known=False,
+                )
+            return CostEstimateMetadata(
+                cost_usd=0.0,
+                pricing_confidence="low",
+                pricing_source="fallback_disabled",
+                warning=warning,
+                model_pricing_known=False,
+            )
