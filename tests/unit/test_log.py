@@ -40,6 +40,9 @@ def make_summary(
         reroutes=reroutes,
         savings_usd=0.05,
         records=records,
+        overhead_usd=0.01,
+        overhead_calls=3,
+        net_savings_usd=0.04,
     )
 
 
@@ -138,6 +141,9 @@ def test_round_trip_basic_fields(tmp_path: Path) -> None:
     assert restored.total_cost == pytest.approx(original.total_cost)
     assert restored.reroutes == original.reroutes
     assert restored.savings_usd == pytest.approx(original.savings_usd)
+    assert restored.overhead_usd == pytest.approx(original.overhead_usd)
+    assert restored.overhead_calls == original.overhead_calls
+    assert restored.net_savings_usd == pytest.approx(original.net_savings_usd)
     assert restored.calls_made == original.calls_made
 
 

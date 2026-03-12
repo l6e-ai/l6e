@@ -18,8 +18,8 @@ from l6e._types import (
     PipelinePolicy,
     PromptComplexity,
     RunSummary,
-    SubagentSpend,
     StageRoutingHint,
+    SubagentSpend,
     UnknownModelPricingMode,
 )
 
@@ -78,6 +78,9 @@ def _summary_from_dict(d: dict) -> RunSummary:  # type: ignore[type-arg]
         subagent_calls=int(d.get("subagent_calls", 0)),
         subagent_spend_usd=float(d.get("subagent_spend_usd", 0.0)),
         subagents=subagents,
+        overhead_usd=float(d.get("overhead_usd", 0.0)),
+        overhead_calls=int(d.get("overhead_calls", 0)),
+        net_savings_usd=float(d.get("net_savings_usd", d.get("savings_usd", 0.0))),
     )
 
 
