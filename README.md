@@ -1,6 +1,7 @@
 # l6e
 
 [![pytest](https://github.com/l6e-ai/l6e/actions/workflows/pytest.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/pytest.yml)
+[![coverage](https://raw.githubusercontent.com/l6e-ai/l6e/python-coverage-comment-action-data/badge.svg)](https://github.com/l6e-ai/l6e/actions/workflows/pytest.yml)
 [![mypy](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml)
 [![ruff](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml)
 
