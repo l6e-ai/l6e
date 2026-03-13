@@ -244,3 +244,24 @@ def test_universal_adapter_all_contains_expected_names() -> None:
 
     assert "PipelineContext" in universal_mod.__all__
     assert "pipeline" in universal_mod.__all__
+
+
+def test_call_invokes_fn_with_keyword_args() -> None:
+    """ctx.call must pass model and messages as keyword arguments.
+
+    A callable that only accepts **kwargs will receive TypeError if invoked
+    positionally — this test locks in the fn(model=..., messages=...) contract.
+    """
+    received: dict = {}
+
+    def kwargs_only_fn(**kwargs: object) -> object:
+        received.update(kwargs)
+        return _FAKE_RESPONSE
+
+    ctx = make_ctx(gate=FakeGate(_ALLOW))
+    ctx.call(fn=kwargs_only_fn, model="gpt-4o", messages=_MESSAGES)
+
+    assert "model" in received, "fn must receive 'model' as a keyword argument"
+    assert "messages" in received, "fn must receive 'messages' as a keyword argument"
+    assert received["model"] == "gpt-4o"
+    assert received["messages"] is _MESSAGES

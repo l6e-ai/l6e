@@ -205,3 +205,52 @@ def test_to_summary_source_mcp_when_specified() -> None:
         source="mcp",
     )
     assert mcp_store.to_summary().source == "mcp"
+
+
+# ---------------------------------------------------------------------------
+# Thread-safety (Fix 7)
+# ---------------------------------------------------------------------------
+
+
+def test_record_call_is_thread_safe() -> None:
+    """20 threads × 50 calls each must produce exactly 1000 records and
+    correct total spend, exercising both the list-append and float-accumulation
+    paths under genuine concurrency."""
+    import threading
+
+    from l6e.store import InMemoryRunStore
+    from tests.conftest import FakeCostEstimator
+
+    THREADS = 20
+    CALLS_PER_THREAD = 50
+    COST_PER_CALL = 0.01
+
+    store = InMemoryRunStore(
+        run_id="thread-test",
+        policy=make_policy(budget=1000.00),
+        estimator=FakeCostEstimator(cost=COST_PER_CALL),
+    )
+
+    def worker(start_index: int) -> None:
+        for i in range(CALLS_PER_THREAD):
+            store.record_call(
+                make_record(
+                    call_index=start_index + i,
+                    cost_usd=COST_PER_CALL,
+                )
+            )
+
+    threads = [
+        threading.Thread(target=worker, args=(t * CALLS_PER_THREAD,))
+        for t in range(THREADS)
+    ]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join()
+
+    expected_count = THREADS * CALLS_PER_THREAD
+    expected_spent = expected_count * COST_PER_CALL
+
+    assert store.call_count() == expected_count
+    assert store.spent() == pytest.approx(expected_spent, rel=1e-6)

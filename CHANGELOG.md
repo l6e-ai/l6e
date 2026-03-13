@@ -7,15 +7,15 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
-## [0.1.0] — 2026-03-10
+## [0.1.4] — 2026-03-13
 
 Initial release. Per-run budget enforcement and model routing for AI agent pipelines.
 
 ### Core runtime
 
 - **`PipelineContext`** — central object for a single pipeline run. Constructed via the `pipeline()` factory.
-- **`pipeline(run_id, policy, log_path=None, router=None)`** — context manager factory. Automatically writes a `RunSummary` to `.l6e/runs.jsonl` on exit, whether the run completes or raises.
-- **`ctx.call(fn, model, messages, stage)`** — primary integration point. Runs advise → execute → record in one call. On allow, calls `fn(model, messages)`. On reroute, calls `fn(local_model, messages)` and marks `rerouted=True` in the record. On halt, behaviour is determined by `policy.on_budget_exceeded`.
+- **`pipeline(policy, run_id=None, log_path=None, router=None)`** — context manager factory. `run_id` defaults to a generated UUID when omitted. Automatically writes a `RunSummary` to `.l6e/runs.jsonl` on exit, whether the run completes or raises.
+- **`ctx.call(fn, model, messages, stage)`** — primary integration point. Runs advise → execute → record in one call. `fn` is called as `fn(model=..., messages=...)` with keyword arguments. On allow, calls `fn` with the original model. On reroute, calls `fn` with the local model and marks `rerouted=True` in the record. On halt, behaviour is determined by `policy.on_budget_exceeded`.
 - **`ctx.advise(model, prompts, stage)`** — gate check only, without executing. Returns a `GateDecision`.
 - **`ctx.record(...)`** — manually record a completed call for cases where `ctx.call()` isn't used.
 - **`ctx.budget_status()`** — returns a `BudgetStatus` snapshot (zero tokens, pure arithmetic). Available at any point mid-run.
@@ -34,30 +34,22 @@ Initial release. Per-run budget enforcement and model routing for AI agent pipel
 
 ### Constraint gate
 
-Pure decision logic with no side effects. Priority order for each call:
-
-1. `stage_overrides` — explicit per-stage `BudgetMode`, wins over everything. `WARN` falls through to allow in v0.1.
-2. `stage_routing` — tier hints: `LOCAL` triggers immediate reroute attempt, `CLOUD_STANDARD` and `CLOUD_FRONTIER` allow without pressure check, `INHERIT` falls through to budget pressure.
-3. Over-budget guard — `store.spent() + estimated_cost > policy.budget` → halt.
-4. Budget pressure threshold — `spent / budget >= reroute_threshold` → applies `budget_mode` (halt, reroute, or warn/allow).
-5. Default allow.
+Pure decision logic with no side effects. Each call is evaluated in priority order: explicit stage overrides win first, then the hard budget ceiling, then stage routing tier hints, then the budget pressure threshold, then default allow.
 
 On reroute: calls `router.best_local_model()`. If no local model is available, falls back to halt.
 
 ### Local router
 
 - Hardware-aware Ollama detection via `l6e_forge` (optional dependency).
-- On first call to `best_local_model()`, imports `l6e_forge.models.auto`, calls `get_system_profile()`, then `suggest_models()`. Returns `None` immediately if `l6e_forge` is not installed, if the import fails, or if `profile.has_ollama` is false.
-- Filters suggestions for `fits_local=True` and `provider="ollama"`, returns `"ollama/{provider_tag}"` for the first match.
-- Result is cached after first call — hardware doesn't change mid-run.
+- On first call to `best_local_model()`, queries the local hardware profile and returns the best fitting Ollama model, or `None` if `l6e_forge` is not installed, Ollama is not running, or no suitable model is found.
+- Result is cached after first call.
 - When `best_local_model()` returns `None`, the gate falls back to halt regardless of the reroute intent.
 
 ### Prompt complexity classifier
 
 - Classifies prompt complexity as `LOW`, `MEDIUM`, or `HIGH` using structural heuristics only — no model, no network call, ~2ms.
-- Stage name short-circuit (checked before content): LOW stages: `formatting`, `format`, `extraction`, `extract`, `retrieval`, `retrieve`, `translation`, `translate`, `listing`. HIGH stages: `reasoning`, `final_reasoning`, `synthesis`, `synthesize`, `analysis`, `analyze`, `evaluation`, `evaluate`.
-- Content score: low-complexity first word (`summarize`, `extract`, `format`, `translate`, `list`, `transcribe`, `convert`, `reformat`, `enumerate`) → -2; high placeholder/template density → -1; short prompt (<200 chars) → -1; long prompt (>2000 chars) → +1; reasoning keywords (`analyze`, `compare`, `evaluate`, `synthesize`, `critique`, `assess`, `contrast`, `argue`, `reason`) → up to +2; multi-step pattern (`Step 1:`, `firstly…then`, numbered list) → +2; more than 2 question marks → +1. Score ≥ 2 → HIGH, ≤ -2 → LOW, otherwise MEDIUM.
-- Used by `L6eCallbackHandler` to auto-infer stage when no `l6e_stage:` tag is present (LOW → `"retrieval"`, MEDIUM → `"formatting"`, HIGH → `"reasoning"`).
+- Stage name takes priority: well-known stage names (e.g. `retrieval`, `formatting`, `reasoning`) short-circuit content analysis.
+- Used by `L6eCallbackHandler` to auto-infer stage when no `l6e_stage:` tag is present.
 - Populates `CallRecord.prompt_complexity`.
 
 ### Run log
@@ -68,7 +60,7 @@ On reroute: calls `router.best_local_model()`. If no local model is available, f
 
 ### Adapters
 
-- **`L6eCallbackHandler`** (`l6e.adapters.langchain`) — `BaseCallbackHandler` for LangChain. Attach via `config={"callbacks": [handler]}`. In `on_llm_start`: extracts model from `invocation_params`, resolves stage from `l6e_stage:<name>` tag or auto-infers from prompt complexity, calls `ctx.advise()`, raises `BudgetExceeded` on halt. In `on_llm_end`: calls `ctx.record()`. **Reroute is advisory** — the decision is recorded but LangChain executes the call with the original model; the `model_used` in the record reflects the decision target, not a network-level substitution. Hard model substitution requires `ctx.call()` directly. Install extra: `pip install 'l6e[langchain]'`.
+- **`L6eCallbackHandler`** (`l6e.adapters.langchain`) — `BaseCallbackHandler` for LangChain. Attach via `config={"callbacks": [handler]}`. In `on_llm_start`: extracts model from `invocation_params`, resolves stage from `l6e_stage:<name>` tag or auto-infers from prompt complexity, calls `ctx.advise()`, raises `BudgetExceeded` on halt. In `on_llm_end`: calls `ctx.record()`. **Reroute is advisory** — the decision is recorded but LangChain executes the call with the original model; `model_used` in the record reflects the original model (not the reroute target), and `rerouted` is always `False`. Hard model substitution requires `ctx.call()` directly. Install extra: `pip install 'l6e[langchain]'`.
 - **`L6eStepCallback`** (`l6e.adapters.crewai`) — plain callable for CrewAI's `step_callback`. No `crewai` package import required at runtime. Calls `ctx.advise()` between each agent step; raises `BudgetExceeded` on halt. Allow and reroute are both advisory in v0.1 — the step proceeds in both cases. Per-step model injection is a v0.2 target.
 - **Universal adapter** (`l6e.adapters.universal`) — wraps any callable; used internally by `ctx.call()`.
 
@@ -94,12 +86,4 @@ On reroute: calls `router.best_local_model()`. If no local model is available, f
 - Latency SLA enforcement (`LatencySLAExceeded` raised when wall time exceeds `policy.latency_sla`)
 - CrewAI per-step model injection (hard reroute, not advisory)
 
-### Pro layer (waitlist)
-
-- Pipeline profiler — reads `.l6e/runs.jsonl` history to generate optimized `PipelinePolicy` configs
-- Stage routing calibration — tunes routing thresholds to your actual workloads
-- Budget envelope recommendations from real cost distributions
-- Spend analytics across all runs and engineers
-- Anomaly detection and drift alerts
-
-→ [Join the waitlist](mailto:hello@l6e.ai?subject=l6e%20Pro%20waitlist)
+→ [Join the Pro waitlist](mailto:hello@l6e.ai?subject=l6e%20Pro%20waitlist)

@@ -82,6 +82,15 @@ class L6eCallbackHandler(BaseCallbackHandler):
 
     Set ``infer_stage=False`` to keep the old behaviour (``stage=None`` when
     no tag is present).
+
+    **Reroute is advisory.** The gate checks budget and routing policy before
+    each LLM call and may decide to reroute, but the LangChain callback API
+    does not expose model substitution at ``on_llm_start`` — the network call
+    has already been dispatched to the original model before ``on_llm_end``
+    fires. Reroute decisions are therefore recorded as-is (``model_used`` equals
+    ``model_requested``, ``rerouted=False``) so that cost accounting reflects
+    what actually happened. Use ``ctx.call()`` directly for hard model
+    substitution.
     """
 
     def __init__(self, ctx: PipelineContext, *, infer_stage: bool = True) -> None:
@@ -143,13 +152,12 @@ class L6eCallbackHandler(BaseCallbackHandler):
 
         stage, stage_source, model_requested, decision, t0 = entry
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
-        rerouted = decision.action == "reroute"
 
         self._ctx.record(
             model_requested=model_requested,
-            model_used=decision.target_model,
+            model_used=model_requested,  # LangChain made the call; reroute was advisory
             response=response,
             elapsed_ms=elapsed_ms,
             stage=stage,
-            rerouted=rerouted,
+            rerouted=False,
         )

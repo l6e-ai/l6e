@@ -164,3 +164,27 @@ def test_run_summary_records_are_tuple() -> None:
     )
     assert isinstance(summary.records, tuple)
     assert len(summary.records) == 1
+
+
+def test_prompt_complexity_importable_from_public_namespace() -> None:
+    """PromptComplexity must be in __all__ and accessible from `import l6e`
+    since it appears in public method signatures (ctx.call, ctx.record)."""
+    import l6e
+
+    assert "PromptComplexity" in l6e.__all__
+    assert hasattr(l6e, "PromptComplexity")
+    from l6e import PromptComplexity
+
+    assert PromptComplexity.LOW == "low"
+    assert PromptComplexity.MEDIUM == "medium"
+    assert PromptComplexity.HIGH == "high"
+
+
+def test_latency_sla_field_documents_not_enforced() -> None:
+    """latency_sla field must carry an inline note that it is not enforced in v0.1."""
+    import inspect
+
+    from l6e._types import PipelinePolicy
+
+    src = inspect.getsource(PipelinePolicy)
+    assert "not enforced" in src or "v0.2" in src

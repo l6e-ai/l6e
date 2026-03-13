@@ -233,3 +233,30 @@ def test_exact_threshold_triggers_pressure() -> None:
     decision = check(gate, store)
 
     assert decision.action == "halt"
+
+
+def test_cloud_frontier_stage_halts_when_call_would_exceed_budget() -> None:
+    """CLOUD_FRONTIER does not exempt a call from the hard budget ceiling."""
+    policy = PipelinePolicy(
+        budget=1.00,
+        stage_routing={"reasoning": StageRoutingHint.CLOUD_FRONTIER},
+    )
+    gate = make_gate(policy)
+    # spent=0.90, estimated_cost=0.20 → 1.10 > 1.00
+    store = FakeStore(budget=1.00, spent_amount=0.90)
+    decision = check(gate, store, cost=0.20, stage="reasoning")
+
+    assert decision.action == "halt"
+
+
+def test_cloud_standard_stage_halts_when_call_would_exceed_budget() -> None:
+    """CLOUD_STANDARD does not exempt a call from the hard budget ceiling."""
+    policy = PipelinePolicy(
+        budget=1.00,
+        stage_routing={"drafting": StageRoutingHint.CLOUD_STANDARD},
+    )
+    gate = make_gate(policy)
+    store = FakeStore(budget=1.00, spent_amount=0.90)
+    decision = check(gate, store, cost=0.20, stage="drafting")
+
+    assert decision.action == "halt"

@@ -5,7 +5,9 @@ No LLM calls live here — adapters execute, PipelineContext advises and records
 """
 from __future__ import annotations
 
+import threading
 import time
+import uuid
 from collections.abc import Callable
 from pathlib import Path
 from types import TracebackType
@@ -54,6 +56,12 @@ class PipelineContext:
 
     Created directly for injection-heavy tests, or via the ``pipeline()``
     factory for production use with default concrete collaborators.
+
+    Thread-safety: ``record()`` and ``call()`` are safe to call from multiple
+    threads — the call_index counter is incremented under a lock.
+    Note: ``run_summary()`` and ``budget_status()`` reads are not protected
+    by this lock.  Do not share a ``PipelineContext`` across threads while
+    writes are still in flight without external coordination.
     """
 
     def __init__(
@@ -74,10 +82,16 @@ class PipelineContext:
         self._classifier = classifier
         self._estimator = estimator
         self._call_index: int = 0
+        self._lock = threading.Lock()
 
     # ------------------------------------------------------------------
     # Context manager
     # ------------------------------------------------------------------
+
+    @property
+    def run_id(self) -> str:
+        """The unique identifier for this pipeline run."""
+        return self._run_id
 
     def __enter__(self) -> PipelineContext:
         return self
@@ -127,8 +141,11 @@ class PipelineContext:
         """Record a completed call. Extracts token usage, estimates cost, appends to store."""
         prompt_tokens, completion_tokens = extract_token_usage(response)
         cost = self._estimator.estimate(model_used, prompt_tokens, completion_tokens)
+        with self._lock:
+            call_index = self._call_index
+            self._call_index += 1
         record = CallRecord(
-            call_index=self._call_index,
+            call_index=call_index,
             model_requested=model_requested,
             model_used=model_used,
             prompt_tokens=prompt_tokens,
@@ -140,7 +157,6 @@ class PipelineContext:
             prompt_complexity=complexity,
         )
         self._store.record_call(record)
-        self._call_index += 1
         return record
 
     def run_summary(self) -> RunSummary:
@@ -166,7 +182,7 @@ class PipelineContext:
 
     def call(
         self,
-        fn: Callable[[str, list[dict[str, str]]], object],
+        fn: Callable[..., object],
         model: str,
         messages: list[dict[str, str]],
         stage: str | None = None,
@@ -180,15 +196,15 @@ class PipelineContext:
 
         Gate actions:
 
-        - **allow** — calls ``fn(model, messages)`` unchanged.
-        - **reroute** — calls ``fn(decision.target_model, messages)``; the
+        - **allow** — calls ``fn(model=..., messages=...)`` unchanged.
+        - **reroute** — calls ``fn(model=decision.target_model, messages=...)``; the
           ``CallRecord`` marks ``rerouted=True`` so savings are tracked.
         - **halt** — does *not* call ``fn``; behaviour is determined by
           ``policy.on_budget_exceeded`` (raise, return fallback, return empty).
 
         Args:
-            fn: Callable that accepts ``(model, messages)`` and returns a
-                response object understood by ``extract_token_usage``.
+            fn: Called as ``fn(model=..., messages=...)`` with keyword arguments.
+                Must return a response object understood by ``extract_token_usage``.
             model: The model the caller *wants* to use.  The gate may
                 substitute a cheaper local model on reroute.
             messages: OpenAI-style chat messages list.  User-role content is
@@ -220,7 +236,7 @@ class PipelineContext:
         effective_model = decision.target_model
 
         t0 = time.perf_counter()
-        response = fn(effective_model, messages)
+        response = fn(model=effective_model, messages=messages)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
         self.record(
@@ -253,8 +269,8 @@ class PipelineContext:
 
 
 def pipeline(
-    run_id: str,
     policy: PipelinePolicy,
+    run_id: str | None = None,
     log_path: Path | None = None,
     router: ILocalRouter | None = None,
     source: str = "pipeline",
@@ -262,8 +278,9 @@ def pipeline(
     """Construct a fully-wired PipelineContext with default concrete collaborators.
 
     Args:
-        run_id:   Unique identifier for this pipeline run.
         policy:   Budget and routing policy.
+        run_id:   Unique identifier for this pipeline run.  When omitted a
+                  UUID v4 is generated automatically.
         log_path: Override the default `.l6e/runs.jsonl` log location.
         router:   Custom router implementing ``best_local_model() -> str | None``.
                   Defaults to ``LocalRouter`` (hardware-aware Ollama detection).
@@ -277,17 +294,20 @@ def pipeline(
     from l6e.router import LocalRouter
     from l6e.store import InMemoryRunStore
 
+    effective_run_id = run_id if run_id is not None else str(uuid.uuid4())
     estimator = LiteLLMCostEstimator(
         fallback_cost_per_1k_tokens=policy.unknown_model_cost_per_1k_tokens
     )
     effective_router = router if router is not None else LocalRouter()
     gate = ConstraintGate(policy=policy, router=effective_router)
-    store = InMemoryRunStore(run_id=run_id, policy=policy, estimator=estimator, source=source)
+    store = InMemoryRunStore(
+        run_id=effective_run_id, policy=policy, estimator=estimator, source=source
+    )
     log = LocalRunLog(path=log_path) if log_path is not None else LocalRunLog()
     classifier = PromptComplexityClassifier()
 
     return PipelineContext(
-        run_id=run_id,
+        run_id=effective_run_id,
         policy=policy,
         gate=gate,
         store=store,
