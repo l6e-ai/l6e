@@ -8,3 +8,4 @@ dist/
 .l6e/
 .coverage
 .pytest_cache/
+.DS_Store
