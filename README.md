@@ -42,7 +42,7 @@ policy = l6e.PipelinePolicy(
     budget_mode=l6e.BudgetMode.REROUTE,
 )
 
-with l6e.pipeline("my-run", policy=policy) as ctx:
+with l6e.pipeline(policy=policy) as ctx:
     response = ctx.call(
         fn=litellm.completion,
         model="gpt-4o",
@@ -76,7 +76,7 @@ policy = l6e.PipelinePolicy(
     },
 )
 
-with l6e.pipeline("run-001", policy=policy) as ctx:
+with l6e.pipeline(policy=policy) as ctx:
     handler = L6eCallbackHandler(ctx)
 
     summary_out = (
@@ -97,12 +97,39 @@ See [`examples/langchain_demo.ipynb`](examples/langchain_demo.ipynb) for a compl
 
 ---
 
+## CrewAI: halt enforcement only (v0.1)
+
+Attach `L6eStepCallback` to stop a crew when the budget is exhausted.
+
+```python
+from l6e.adapters.crewai import L6eStepCallback
+
+with l6e.pipeline(policy) as ctx:
+    crew = Crew(
+        agents=agents,
+        tasks=tasks,
+        step_callback=L6eStepCallback(ctx, stage="agent_step"),
+    )
+    crew.kickoff()
+```
+
+**v0.1 limitation:** CrewAI's `step_callback` does not receive the response object from each LLM call, so l6e cannot record token usage or cost per step. This means:
+
+- `ctx.budget_status().spent_usd` stays at `$0.00` throughout the run.
+- `runs.jsonl` will contain an entry with `calls_made: 0` and `total_cost: 0.0`.
+- Reroute decisions are advisory — the step always proceeds regardless of budget pressure.
+- **Only halt enforcement is functional**: if you pre-set a tight enough budget and check `budget_status()` manually, the gate will fire on the next step after the first `advise()` call detects over-budget.
+
+Full per-call cost tracking for CrewAI is planned for v0.2.
+
+---
+
 ## Agents can read budget state and adapt
 
 `ctx.budget_status()` returns a snapshot of the current run's economics — `spent_usd`, `remaining_usd`, `budget_pressure`, `reroutes`, `calls_made`. Your agent can call it at any point mid-run and branch on the result:
 
 ```python
-with l6e.pipeline("run", policy) as ctx:
+with l6e.pipeline(policy) as ctx:
     retrieval_result = ctx.call(fn=litellm.completion, model="gpt-4o",
                                 messages=[...], stage="retrieval")
 
@@ -144,7 +171,7 @@ from pathlib import Path
 import l6e
 
 policy = l6e.PipelinePolicy.from_toml(Path("l6e-policy.toml"))
-with l6e.pipeline("run-001", policy=policy) as ctx:
+with l6e.pipeline(policy=policy) as ctx:
     ...
 ```
 

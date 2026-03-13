@@ -55,7 +55,7 @@ class PipelinePolicy:
     budget_mode: BudgetMode = BudgetMode.HALT
     on_budget_exceeded: OnBudgetExceeded = OnBudgetExceeded.RAISE
     fallback_result: str | None = None
-    latency_sla: float | None = None
+    latency_sla: float | None = None  # not enforced in v0.1; reserved for v0.2
     reroute_threshold: float = 0.8
     unknown_model_cost_per_1k_tokens: float = 0.01
     unknown_model_pricing_mode: UnknownModelPricingMode = (

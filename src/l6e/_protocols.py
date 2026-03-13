@@ -47,10 +47,6 @@ class IRunStore(Protocol):
         """Build a RunSummary from current state."""
         ...
 
-    def export(self) -> RunSummary:
-        """Cloud telemetry seam — returns summary for upload. Same as to_summary() in OSS."""
-        ...
-
 
 class ILocalRouter(Protocol):
     def best_local_model(self) -> str | None:

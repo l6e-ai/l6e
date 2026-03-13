@@ -4,7 +4,7 @@ Primary entry points:
 
     Universal (raw LiteLLM / OpenAI SDK):
         import l6e
-        with l6e.pipeline("run-id", policy) as ctx:
+        with l6e.pipeline(policy) as ctx:
             response = ctx.call(fn, model="gpt-4o", messages=[...], stage="summarization")
 
     LangChain:
@@ -18,23 +18,25 @@ from l6e._types import (
     BudgetStatus,
     OnBudgetExceeded,
     PipelinePolicy,
+    PromptComplexity,
     RunSummary,
     StageRoutingHint,
     UnknownModelPricingMode,
 )
-from l6e.exceptions import BudgetExceeded, LatencySLAExceeded
+from l6e.exceptions import BudgetExceeded
+from l6e.exceptions import LatencySLAExceeded as LatencySLAExceeded
 from l6e.pipeline import PipelineContext, pipeline
 
 __all__ = [
     "pipeline",
     "PipelineContext",
     "BudgetExceeded",
-    "LatencySLAExceeded",
     "RunSummary",
     "BudgetMode",
     "BudgetStatus",
     "PipelinePolicy",
     "OnBudgetExceeded",
+    "PromptComplexity",
     "StageRoutingHint",
     "UnknownModelPricingMode",
 ]

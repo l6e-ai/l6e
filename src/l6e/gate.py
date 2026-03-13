@@ -26,8 +26,8 @@ class ConstraintGate:
 
     Priority order:
     1. stage_overrides  — explicit BudgetMode per stage, wins over everything
-    2. stage_routing    — tier hint per stage
-    3. over-budget      — estimated_cost would push spend past budget
+    2. over-budget      — estimated_cost would push spend past budget
+    3. stage_routing    — tier hint per stage
     4. budget pressure  — spent/budget >= reroute_threshold
     5. allow            — budget healthy, no stage constraint
     """
@@ -59,7 +59,13 @@ class ConstraintGate:
             return _allow(model, "stage_override:warn")
 
         # ------------------------------------------------------------------
-        # 2. stage_routing — tier hint per stage
+        # 2. Over-budget guard — estimated call would exceed total budget
+        # ------------------------------------------------------------------
+        if store.spent() + estimated_cost > policy.budget:
+            return _halt(model, "budget_pressure:halt")
+
+        # ------------------------------------------------------------------
+        # 3. stage_routing — tier hint per stage
         # ------------------------------------------------------------------
         if stage is not None and stage in policy.stage_routing:
             hint = policy.stage_routing[stage]
@@ -70,12 +76,6 @@ class ConstraintGate:
             if hint == StageRoutingHint.CLOUD_FRONTIER:
                 return _allow(model, "allow:frontier_protected")
             # INHERIT → fall through to budget pressure
-
-        # ------------------------------------------------------------------
-        # 3. Over-budget guard — estimated call would exceed total budget
-        # ------------------------------------------------------------------
-        if store.spent() + estimated_cost > policy.budget:
-            return _halt(model, "budget_pressure:halt")
 
         # ------------------------------------------------------------------
         # 4. Budget pressure — spent/budget >= reroute_threshold

@@ -15,6 +15,8 @@ runs in ``runs.jsonl`` and any downstream analytics.
 """
 from __future__ import annotations
 
+import threading
+
 from l6e._protocols import ICostEstimator
 from l6e._types import CallRecord, PipelinePolicy, RunSummary
 
@@ -25,6 +27,11 @@ class InMemoryRunStore:
     Injected with an ICostEstimator so it can compute the counterfactual cost
     (what model_requested would have cost) when a call is rerouted to a cheaper
     model — the delta becomes savings_usd in the RunSummary.
+
+    Thread-safety: ``record_call`` is safe to call from multiple threads.
+    Note: ``to_summary()`` and ``budget_status()``-style reads are NOT protected
+    by this lock — callers must not share a store across threads while writes
+    are still in flight unless they add external coordination.
     """
 
     def __init__(
@@ -41,6 +48,7 @@ class InMemoryRunStore:
         self._records: list[CallRecord] = []
         self._total_cost: float = 0.0
         self._counterfactual_cost: float = 0.0
+        self._lock = threading.Lock()
 
     # --- IRunStore protocol ---
 
@@ -53,20 +61,21 @@ class InMemoryRunStore:
         return self._policy.budget
 
     def record_call(self, record: CallRecord) -> None:
-        self._records.append(record)
-        self._total_cost += record.cost_usd
+        with self._lock:
+            self._records.append(record)
+            self._total_cost += record.cost_usd
 
-        if record.rerouted and record.model_requested != record.model_used:
-            # Compute what the requested model would have cost at the same token counts.
-            counterfactual = self._estimator.estimate(
-                model=record.model_requested,
-                prompt_tokens=record.prompt_tokens,
-                completion_tokens=record.completion_tokens,
-            )
-            # If estimator returns 0 (unknown model), fall back to actual cost — no savings.
-            self._counterfactual_cost += max(counterfactual, record.cost_usd)
-        else:
-            self._counterfactual_cost += record.cost_usd
+            if record.rerouted and record.model_requested != record.model_used:
+                # Compute what the requested model would have cost at the same token counts.
+                counterfactual = self._estimator.estimate(
+                    model=record.model_requested,
+                    prompt_tokens=record.prompt_tokens,
+                    completion_tokens=record.completion_tokens,
+                )
+                # If estimator returns 0 (unknown model), fall back to actual cost — no savings.
+                self._counterfactual_cost += max(counterfactual, record.cost_usd)
+            else:
+                self._counterfactual_cost += record.cost_usd
 
     def spent(self) -> float:
         return self._total_cost

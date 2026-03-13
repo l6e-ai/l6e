@@ -56,3 +56,10 @@ def test_budget_exceeded_empty_reason_default() -> None:
     msg = str(exc)
     assert "0.100000" in msg
     assert "0.050000" in msg
+
+
+def test_latency_sla_exceeded_not_in_public_all() -> None:
+    """LatencySLAExceeded is not raised in v0.1; it must not be advertised in __all__."""
+    import l6e
+
+    assert "LatencySLAExceeded" not in l6e.__all__

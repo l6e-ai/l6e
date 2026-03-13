@@ -181,7 +181,8 @@ def test_on_llm_end_llm_output_token_usage_extracted() -> None:
     assert record.completion_tokens == 50
 
 
-def test_on_llm_end_reroute_records_target_model_as_model_used() -> None:
+def test_on_llm_end_reroute_decision_records_original_model_as_used() -> None:
+    """Reroute is advisory in LangChain — the cloud model was actually called."""
     store = FakeStore(budget=1.00, spent_amount=0.0)
     ctx = make_ctx(gate=FakeGate(_REROUTE), store=store)
     handler = make_handler(ctx)
@@ -193,8 +194,37 @@ def test_on_llm_end_reroute_records_target_model_as_model_used() -> None:
     handler.on_llm_end(_FAKE_RESPONSE, run_id=rid)
     record = store._records[0]
     assert record.model_requested == "gpt-4o"
-    assert record.model_used == "ollama/qwen2.5:7b"
-    assert record.rerouted is True
+    assert record.model_used == "gpt-4o"   # cloud model actually ran
+    assert record.rerouted is False
+
+
+def test_on_llm_end_reroute_decision_produces_no_phantom_savings() -> None:
+    """A reroute decision that couldn't be enforced must not inflate savings_usd."""
+    from l6e._classify import PromptComplexityClassifier
+    from l6e.costs import LiteLLMCostEstimator
+    from l6e.store import InMemoryRunStore
+
+    policy = PipelinePolicy(budget=1.00)
+    estimator = LiteLLMCostEstimator()
+    real_store = InMemoryRunStore(run_id="t", policy=policy, estimator=estimator)
+    ctx = PipelineContext(
+        run_id="test-run",
+        policy=policy,
+        gate=FakeGate(_REROUTE),
+        store=real_store,
+        log=FakeLog(),
+        classifier=PromptComplexityClassifier(),
+        estimator=estimator,
+    )
+    handler = make_handler(ctx)
+    rid = _run_id()
+    handler.on_llm_start(
+        _SERIALIZED, _PROMPTS, run_id=rid,
+        invocation_params={"model": "gpt-4o"},
+    )
+    handler.on_llm_end(_FAKE_RESPONSE, run_id=rid)
+    summary = real_store.to_summary()
+    assert summary.savings_usd == pytest.approx(0.0)
 
 
 # ---------------------------------------------------------------------------

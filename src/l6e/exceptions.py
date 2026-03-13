@@ -15,7 +15,11 @@ class BudgetExceeded(Exception):
 
 
 class LatencySLAExceeded(Exception):
-    """Raised when a pipeline run has exceeded its latency SLA (enforced in v0.2)."""
+    """Not raised in v0.1; reserved for v0.2 latency SLA enforcement.
+
+    Kept importable for forward-compatibility so user code like
+    ``except LatencySLAExceeded`` compiles today without error.
+    """
 
     def __init__(self, elapsed_ms: float, sla_ms: float) -> None:
         self.elapsed_ms = elapsed_ms
