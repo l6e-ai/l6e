@@ -5,11 +5,26 @@ description = "Per-run budget enforcement and model routing for AI agent pipelin
 readme = "README.md"
 license = "Apache-2.0"
 license-files = ["LICEN[CS]E*"]
+authors = [{ name = "l6e AI", email = "hello@l6e.ai" }]
+classifiers = [
+    "Development Status :: 3 - Alpha",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Typing :: Typed",
+]
 requires-python = ">=3.11"
 dependencies = [
     "litellm>=1.0.0",
     "tiktoken>=0.7.0",
 ]
+
+[project.urls]
+Homepage = "https://github.com/l6e-ai/l6e"
+Repository = "https://github.com/l6e-ai/l6e"
+Issues = "https://github.com/l6e-ai/l6e/issues"
+Changelog = "https://github.com/l6e-ai/l6e/blob/main/CHANGELOG.md"
 
 [project.optional-dependencies]
 langchain = ["langchain-core>=0.2.0"]
