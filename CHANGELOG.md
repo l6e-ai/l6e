@@ -7,6 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.2.0] — 2026-03-15
+
+### Breaking changes
+
+- **Cost fields changed from `float` to `Decimal`** — `cost_usd`, `spent_usd`, `remaining_usd`, `budget_usd`, `savings_usd`, and all related fields are now `decimal.Decimal` instead of `float`. This eliminates floating-point rounding errors in accumulated cost tracking. Code that compares or serialises these fields as plain floats will need to be updated.
+
+---
+
 ## [0.1.6] — 2026-03-13
 
 Initial release. Per-run budget enforcement and model routing for AI agent pipelines.
@@ -80,10 +88,5 @@ On reroute: calls `router.best_local_model()`. If no local model is available, f
 ---
 
 ## Upcoming
-
-### v0.2 (planned)
-
-- Latency SLA enforcement (`LatencySLAExceeded` raised when wall time exceeds `policy.latency_sla`)
-- CrewAI per-step model injection (hard reroute, not advisory)
 
 → [Join the Pro waitlist](mailto:hello@l6e.ai?subject=l6e%20Pro%20waitlist)
