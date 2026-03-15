@@ -5,6 +5,8 @@ Returns a GateDecision(action, target_model, reason) for each pending call.
 """
 from __future__ import annotations
 
+from decimal import Decimal
+
 from l6e._protocols import ILocalRouter, IRunStore
 from l6e._types import BudgetMode, GateDecision, PipelinePolicy, PromptComplexity, StageRoutingHint
 
@@ -40,7 +42,7 @@ class ConstraintGate:
         self,
         store: IRunStore,
         model: str,
-        estimated_cost: float,
+        estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
     ) -> GateDecision:
@@ -61,7 +63,7 @@ class ConstraintGate:
         # ------------------------------------------------------------------
         # 2. Over-budget guard — estimated call would exceed total budget
         # ------------------------------------------------------------------
-        if store.spent() + estimated_cost > policy.budget:
+        if store.spent() + estimated_cost > Decimal(str(policy.budget)):
             return _halt(model, "budget_pressure:halt")
 
         # ------------------------------------------------------------------
@@ -80,7 +82,16 @@ class ConstraintGate:
         # ------------------------------------------------------------------
         # 4. Budget pressure — spent/budget >= reroute_threshold
         # ------------------------------------------------------------------
-        if policy.budget > 0 and store.spent() / policy.budget >= policy.reroute_threshold:
+        if policy.budget > 0:
+            budget = Decimal(str(policy.budget))
+            spent_ratio = store.spent() / budget
+            reroute_threshold = Decimal(str(policy.reroute_threshold))
+
+            is_over_threshold = spent_ratio >= reroute_threshold
+        else:
+            is_over_threshold = False
+
+        if is_over_threshold:
             mode = policy.budget_mode
             if mode == BudgetMode.HALT:
                 return _halt(model, "budget_pressure:halt")

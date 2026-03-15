@@ -1,6 +1,8 @@
 """Unit tests for store.py — InMemoryRunStore."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from l6e._types import (
@@ -18,7 +20,7 @@ def make_record(
     call_index: int = 0,
     model_requested: str = "gpt-4o",
     model_used: str = "gpt-4o",
-    cost_usd: float = 0.01,
+    cost_usd: Decimal = Decimal("0.01"),
     rerouted: bool = False,
     stage: str | None = None,
     prompt_tokens: int = 100,
@@ -41,7 +43,7 @@ def make_record(
 def estimator():
     from tests.conftest import FakeCostEstimator
 
-    return FakeCostEstimator(cost=0.05)
+    return FakeCostEstimator(cost=Decimal("0.05"))
 
 
 @pytest.fixture
@@ -61,11 +63,11 @@ def store(estimator):
 
 
 def test_fresh_store_spent_is_zero(store) -> None:
-    assert store.spent() == 0.0
+    assert store.spent() == Decimal("0")
 
 
 def test_fresh_store_remaining_equals_budget(store) -> None:
-    assert store.remaining() == 1.00
+    assert store.remaining() == Decimal("1")
 
 
 def test_fresh_store_call_count_is_zero(store) -> None:
@@ -86,14 +88,14 @@ def test_budget_property(store) -> None:
 
 
 def test_spent_accumulates_after_record(store) -> None:
-    store.record_call(make_record(cost_usd=0.10))
-    store.record_call(make_record(call_index=1, cost_usd=0.05))
-    assert pytest.approx(store.spent()) == 0.15
+    store.record_call(make_record(cost_usd=Decimal("0.10")))
+    store.record_call(make_record(call_index=1, cost_usd=Decimal("0.05")))
+    assert store.spent() == Decimal("0.15")
 
 
 def test_remaining_decreases_after_record(store) -> None:
-    store.record_call(make_record(cost_usd=0.25))
-    assert pytest.approx(store.remaining()) == 0.75
+    store.record_call(make_record(cost_usd=Decimal("0.25")))
+    assert store.remaining() == Decimal("0.75")
 
 
 def test_call_count_increments(store) -> None:
@@ -129,10 +131,10 @@ def test_to_summary_records_length(store) -> None:
 
 
 def test_to_summary_total_cost(store) -> None:
-    store.record_call(make_record(call_index=0, cost_usd=0.03))
-    store.record_call(make_record(call_index=1, cost_usd=0.07))
+    store.record_call(make_record(call_index=0, cost_usd=Decimal("0.03")))
+    store.record_call(make_record(call_index=1, cost_usd=Decimal("0.07")))
     summary = store.to_summary()
-    assert pytest.approx(summary.total_cost) == 0.10
+    assert summary.total_cost == Decimal("0.10")
 
 
 def test_export_equals_to_summary(store) -> None:
@@ -146,14 +148,13 @@ def test_export_equals_to_summary(store) -> None:
 
 
 def test_savings_zero_when_no_reroutes(store) -> None:
-    # model_requested == model_used → no savings
     store.record_call(make_record(
         model_requested="gpt-4o",
         model_used="gpt-4o",
-        cost_usd=0.05,
+        cost_usd=Decimal("0.05"),
         rerouted=False,
     ))
-    assert store.to_summary().savings_usd == 0.0
+    assert store.to_summary().savings_usd == Decimal("0")
 
 
 def test_savings_positive_when_rerouted_to_cheaper_model() -> None:
@@ -162,10 +163,10 @@ def test_savings_positive_when_rerouted_to_cheaper_model() -> None:
 
     class TieredEstimator:
         """Returns different costs per model to simulate cheaper reroute."""
-        def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+        def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
             if "gpt-4o" in model and "mini" not in model:
-                return 0.10
-            return 0.01  # cheaper model
+                return Decimal("0.10")
+            return Decimal("0.01")
 
     store = InMemoryRunStore(
         run_id="r1",
@@ -175,13 +176,13 @@ def test_savings_positive_when_rerouted_to_cheaper_model() -> None:
     store.record_call(make_record(
         model_requested="gpt-4o",
         model_used="ollama/qwen2.5:7b",
-        cost_usd=0.01,
+        cost_usd=Decimal("0.01"),
         rerouted=True,
         prompt_tokens=100,
         completion_tokens=50,
     ))
     summary = store.to_summary()
-    assert summary.savings_usd > 0.0
+    assert summary.savings_usd > Decimal("0")
 
 
 def test_to_summary_calls_made(store) -> None:
@@ -214,7 +215,7 @@ def test_to_summary_source_mcp_when_specified() -> None:
 
 def test_record_call_is_thread_safe() -> None:
     """20 threads × 50 calls each must produce exactly 1000 records and
-    correct total spend, exercising both the list-append and float-accumulation
+    correct total spend, exercising both the list-append and Decimal-accumulation
     paths under genuine concurrency."""
     import threading
 
@@ -223,7 +224,7 @@ def test_record_call_is_thread_safe() -> None:
 
     THREADS = 20
     CALLS_PER_THREAD = 50
-    COST_PER_CALL = 0.01
+    COST_PER_CALL = Decimal("0.01")
 
     store = InMemoryRunStore(
         run_id="thread-test",
@@ -250,7 +251,7 @@ def test_record_call_is_thread_safe() -> None:
         t.join()
 
     expected_count = THREADS * CALLS_PER_THREAD
-    expected_spent = expected_count * COST_PER_CALL
+    expected_spent = Decimal(str(expected_count)) * COST_PER_CALL
 
     assert store.call_count() == expected_count
-    assert store.spent() == pytest.approx(expected_spent, rel=1e-6)
+    assert store.spent() == expected_spent

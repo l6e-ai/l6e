@@ -2,9 +2,8 @@
 from __future__ import annotations
 
 import warnings
+from decimal import Decimal
 from unittest.mock import patch
-
-import pytest
 
 
 def test_known_model_returns_nonzero_cost() -> None:
@@ -46,8 +45,7 @@ def test_unknown_model_uses_default_fallback_rate() -> None:
             prompt_tokens=800,
             completion_tokens=200,
         )
-    # (800 + 200) / 1000 * 0.01 = 0.01
-    assert cost == 0.01
+    assert cost == Decimal("0.01")
 
 
 def test_zero_tokens_returns_zero() -> None:
@@ -93,8 +91,7 @@ def test_estimator_handles_litellm_exception_with_fallback() -> None:
         warnings.simplefilter("ignore")
         with patch("litellm.cost_per_token", side_effect=Exception("boom")):
             cost = estimator.estimate(model="gpt-4o-mini", prompt_tokens=100, completion_tokens=50)
-    # (100 + 50) / 1000 * 0.01 = 0.0015
-    assert cost == pytest.approx(0.0015)
+    assert cost == Decimal("0.0015")
 
 
 def test_estimator_handles_litellm_exception_fallback_disabled() -> None:

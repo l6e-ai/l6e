@@ -1,6 +1,8 @@
 """Unit tests for pipeline.py — PipelineContext."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 import pytest
 
 from l6e._types import (
@@ -250,9 +252,9 @@ def test_budget_status_fields_correct() -> None:
     ctx = make_ctx(policy=PipelinePolicy(budget=2.00), store=store)
     status = ctx.budget_status()
     assert status.run_id == "run-42"
-    assert status.spent_usd == pytest.approx(0.50)
-    assert status.remaining_usd == pytest.approx(1.50)
-    assert status.budget_usd == pytest.approx(2.00)
+    assert status.spent_usd == Decimal("0.50")
+    assert status.remaining_usd == Decimal("1.50")
+    assert status.budget_usd == Decimal("2")
 
 
 # ---------------------------------------------------------------------------

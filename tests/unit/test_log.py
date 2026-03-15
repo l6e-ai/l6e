@@ -1,6 +1,7 @@
 """Unit tests for _log.py — LocalRunLog."""
 from __future__ import annotations
 
+from decimal import Decimal
 from pathlib import Path
 
 import pytest
@@ -21,7 +22,7 @@ def make_summary(
     *,
     run_id: str = "r1",
     budget: float = 0.50,
-    total_cost: float = 0.10,
+    total_cost: Decimal = Decimal("0.10"),
     reroutes: int = 1,
     records: tuple[CallRecord, ...] = (),
 ) -> RunSummary:
@@ -39,11 +40,11 @@ def make_summary(
         total_cost=total_cost,
         calls_made=len(records),
         reroutes=reroutes,
-        savings_usd=0.05,
+        savings_usd=Decimal("0.05"),
         records=records,
-        overhead_usd=0.01,
+        overhead_usd=Decimal("0.01"),
         overhead_calls=3,
-        net_savings_usd=0.04,
+        net_savings_usd=Decimal("0.04"),
         savings_confidence="exact",
     )
 
@@ -55,7 +56,7 @@ def make_record(call_index: int = 0) -> CallRecord:
         model_used="ollama/qwen2.5:7b",
         prompt_tokens=100,
         completion_tokens=50,
-        cost_usd=0.001,
+        cost_usd=Decimal("0.001"),
         rerouted=True,
         elapsed_ms=200.0,
         stage="retrieval",
@@ -135,17 +136,17 @@ def test_round_trip_basic_fields(tmp_path: Path) -> None:
     from l6e._log import LocalRunLog
 
     log = LocalRunLog(path=tmp_path / ".l6e" / "runs.jsonl")
-    original = make_summary(run_id="round-trip-1", total_cost=0.123, reroutes=2)
+    original = make_summary(run_id="round-trip-1", total_cost=Decimal("0.123"), reroutes=2)
     log.append(original)
 
     restored = log.read_recent(1)[0]
     assert restored.run_id == original.run_id
-    assert restored.total_cost == pytest.approx(original.total_cost)
+    assert restored.total_cost == original.total_cost
     assert restored.reroutes == original.reroutes
-    assert restored.savings_usd == pytest.approx(original.savings_usd)
-    assert restored.overhead_usd == pytest.approx(original.overhead_usd)
+    assert restored.savings_usd == original.savings_usd
+    assert restored.overhead_usd == original.overhead_usd
     assert restored.overhead_calls == original.overhead_calls
-    assert restored.net_savings_usd == pytest.approx(original.net_savings_usd)
+    assert restored.net_savings_usd == original.net_savings_usd
     assert restored.savings_confidence == original.savings_confidence
     assert restored.calls_made == original.calls_made
 
@@ -267,19 +268,19 @@ def test_round_trip_subagent_spend(tmp_path: Path) -> None:
         actor_id="agent-abc",
         actor_name="research-agent",
         calls_made=5,
-        total_cost_usd=0.042,
+        total_cost_usd=Decimal("0.042"),
     )
     policy = PipelinePolicy(budget=1.0)
     original = RunSummary(
         run_id="subagent-run",
         policy=policy,
-        total_cost=0.042,
+        total_cost=Decimal("0.042"),
         calls_made=0,
         reroutes=0,
-        savings_usd=0.0,
+        savings_usd=Decimal("0"),
         records=(),
         subagent_calls=5,
-        subagent_spend_usd=0.042,
+        subagent_spend_usd=Decimal("0.042"),
         subagents=(subagent,),
     )
     log.append(original)
@@ -290,7 +291,7 @@ def test_round_trip_subagent_spend(tmp_path: Path) -> None:
     assert sa.actor_id == "agent-abc"
     assert sa.actor_name == "research-agent"
     assert sa.calls_made == 5
-    assert sa.total_cost_usd == pytest.approx(0.042)
+    assert sa.total_cost_usd == Decimal("0.042")
 
 
 def test_round_trip_subagent_spend_actor_name_none(tmp_path: Path) -> None:
@@ -302,16 +303,16 @@ def test_round_trip_subagent_spend_actor_name_none(tmp_path: Path) -> None:
         actor_id="anon-agent",
         actor_name=None,
         calls_made=1,
-        total_cost_usd=0.001,
+        total_cost_usd=Decimal("0.001"),
     )
     policy = PipelinePolicy(budget=1.0)
     original = RunSummary(
         run_id="anon-run",
         policy=policy,
-        total_cost=0.001,
+        total_cost=Decimal("0.001"),
         calls_made=0,
         reroutes=0,
-        savings_usd=0.0,
+        savings_usd=Decimal("0"),
         records=(),
         subagents=(subagent,),
     )

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import tomllib
 from dataclasses import dataclass, field
+from decimal import Decimal
 from enum import StrEnum
 from pathlib import Path
 from typing import Literal
@@ -120,9 +121,9 @@ class BudgetStatus:
     """Zero-token pipeline economics snapshot. Agent-queryable via ctx.budget_status()."""
 
     run_id: str
-    spent_usd: float
-    remaining_usd: float
-    budget_usd: float
+    spent_usd: Decimal
+    remaining_usd: Decimal
+    budget_usd: Decimal
     calls_made: int
     reroutes: int
     pct_used: float
@@ -138,7 +139,7 @@ class CallRecord:
     model_used: str
     prompt_tokens: int
     completion_tokens: int
-    cost_usd: float
+    cost_usd: Decimal
     rerouted: bool
     elapsed_ms: float
     stage: str | None = None
@@ -155,23 +156,23 @@ class SubagentSpend:
     actor_id: str
     actor_name: str | None
     calls_made: int
-    total_cost_usd: float
+    total_cost_usd: Decimal
 
 
 @dataclass(frozen=True)
 class RunSummary:
     run_id: str
     policy: PipelinePolicy
-    total_cost: float
+    total_cost: Decimal
     calls_made: int
     reroutes: int
-    savings_usd: float
+    savings_usd: Decimal
     records: tuple[CallRecord, ...]
     source: str = "pipeline"  # "mcp" for MCP session runs
     subagent_calls: int = 0
-    subagent_spend_usd: float = 0.0
+    subagent_spend_usd: Decimal = Decimal("0")
     subagents: tuple[SubagentSpend, ...] = ()
-    overhead_usd: float = 0.0
+    overhead_usd: Decimal = Decimal("0")
     overhead_calls: int = 0
-    net_savings_usd: float = 0.0
+    net_savings_usd: Decimal = Decimal("0")
     savings_confidence: str = "estimate_only"  # "estimate_only" | "partial_exact" | "exact"

@@ -5,13 +5,14 @@ Using Protocol (structural subtyping) keeps the core free of concrete dependenci
 """
 from __future__ import annotations
 
+from decimal import Decimal
 from typing import Protocol
 
 from l6e._types import CallRecord, GateDecision, PromptComplexity, RunSummary
 
 
 class ICostEstimator(Protocol):
-    def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
         """Return estimated cost in USD for the given token counts."""
         ...
 
@@ -31,11 +32,11 @@ class IRunStore(Protocol):
         """Append a completed call record to the run."""
         ...
 
-    def spent(self) -> float:
+    def spent(self) -> Decimal:
         """Total USD spent so far in this run."""
         ...
 
-    def remaining(self) -> float:
+    def remaining(self) -> Decimal:
         """Remaining budget in USD."""
         ...
 
@@ -59,7 +60,7 @@ class IConstraintGate(Protocol):
         self,
         store: IRunStore,
         model: str,
-        estimated_cost: float,
+        estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
     ) -> GateDecision:

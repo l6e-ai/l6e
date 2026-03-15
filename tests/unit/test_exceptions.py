@@ -48,13 +48,14 @@ def test_latency_sla_exceeded_can_be_raised_and_caught() -> None:
 
 
 def test_budget_exceeded_empty_reason_default() -> None:
+    from decimal import Decimal
+
     from l6e.exceptions import BudgetExceeded
 
-    exc = BudgetExceeded(spent=0.10, budget=0.05)
+    exc = BudgetExceeded(spent=Decimal("0.10"), budget=0.05)
     assert exc.reason == ""
-    # Message should not contain a trailing period or extra whitespace
     msg = str(exc)
-    assert "0.100000" in msg
+    assert "0.10" in msg
     assert "0.050000" in msg
 
 
