@@ -224,7 +224,8 @@ def test_on_llm_end_reroute_decision_produces_no_phantom_savings() -> None:
     )
     handler.on_llm_end(_FAKE_RESPONSE, run_id=rid)
     summary = real_store.to_summary()
-    assert summary.savings_usd == pytest.approx(0.0)
+    from decimal import Decimal
+    assert summary.savings_usd == Decimal("0")
 
 
 # ---------------------------------------------------------------------------

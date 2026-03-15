@@ -4,6 +4,7 @@ from __future__ import annotations
 import re
 import warnings
 from dataclasses import dataclass
+from decimal import Decimal
 from typing import Literal
 
 import litellm
@@ -78,7 +79,7 @@ def resolve_model_id(model_id: str) -> str | None:
 
 @dataclass(frozen=True)
 class CostEstimateMetadata:
-    cost_usd: float
+    cost_usd: Decimal
     pricing_confidence: Literal["high", "low"]
     pricing_source: str
     warning: str | None
@@ -104,7 +105,7 @@ class LiteLLMCostEstimator:
     def __init__(self, fallback_cost_per_1k_tokens: float = 0.01) -> None:
         self._fallback_cost_per_1k = fallback_cost_per_1k_tokens
 
-    def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
         """Return estimated cost in USD.
 
         Returns 0.0 (or the configured fallback rate) for unknown models.
@@ -132,7 +133,7 @@ class LiteLLMCostEstimator:
                 completion_tokens=completion_tokens,
             )
             return CostEstimateMetadata(
-                cost_usd=prompt_cost + completion_cost,
+                cost_usd=Decimal(str(prompt_cost + completion_cost)),
                 pricing_confidence="high",
                 pricing_source="litellm_table",
                 warning=None,
@@ -151,7 +152,7 @@ class LiteLLMCostEstimator:
                     completion_tokens=completion_tokens,
                 )
                 return CostEstimateMetadata(
-                    cost_usd=prompt_cost + completion_cost,
+                    cost_usd=Decimal(str(prompt_cost + completion_cost)),
                     pricing_confidence="high",
                     pricing_source="litellm_table_resolved",
                     warning=None,
@@ -174,7 +175,7 @@ class LiteLLMCostEstimator:
         if self._fallback_cost_per_1k > 0:
             total_tokens = prompt_tokens + completion_tokens
             return CostEstimateMetadata(
-                cost_usd=total_tokens / 1000.0 * self._fallback_cost_per_1k,
+                cost_usd=Decimal(str(total_tokens / 1000.0 * self._fallback_cost_per_1k)),
                 pricing_confidence="low",
                 pricing_source="fallback_rate",
                 warning=warning,
@@ -182,7 +183,7 @@ class LiteLLMCostEstimator:
                 resolved_model=None,
             )
         return CostEstimateMetadata(
-            cost_usd=0.0,
+            cost_usd=Decimal("0"),
             pricing_confidence="low",
             pricing_source="fallback_disabled",
             warning=warning,

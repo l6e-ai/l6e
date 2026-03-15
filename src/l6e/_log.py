@@ -9,6 +9,7 @@ from __future__ import annotations
 import dataclasses
 import json
 from collections import deque
+from decimal import Decimal
 from pathlib import Path
 
 from l6e._types import (
@@ -69,18 +70,18 @@ def _summary_from_dict(d: dict) -> RunSummary:  # type: ignore[type-arg]
     return RunSummary(
         run_id=d["run_id"],
         policy=policy,
-        total_cost=float(d["total_cost"]),
+        total_cost=Decimal(str(d["total_cost"])),
         calls_made=int(d["calls_made"]),
         reroutes=int(d["reroutes"]),
-        savings_usd=float(d["savings_usd"]),
+        savings_usd=Decimal(str(d["savings_usd"])),
         records=records,
         source=d.get("source", "pipeline"),
         subagent_calls=int(d.get("subagent_calls", 0)),
-        subagent_spend_usd=float(d.get("subagent_spend_usd", 0.0)),
+        subagent_spend_usd=Decimal(str(d.get("subagent_spend_usd", 0))),
         subagents=subagents,
-        overhead_usd=float(d.get("overhead_usd", 0.0)),
+        overhead_usd=Decimal(str(d.get("overhead_usd", 0))),
         overhead_calls=int(d.get("overhead_calls", 0)),
-        net_savings_usd=float(d.get("net_savings_usd", d.get("savings_usd", 0.0))),
+        net_savings_usd=Decimal(str(d.get("net_savings_usd", d.get("savings_usd", 0)))),
         savings_confidence=str(d.get("savings_confidence", "estimate_only")),
     )
 
@@ -123,7 +124,7 @@ def _record_from_dict(d: dict) -> CallRecord:  # type: ignore[type-arg]
         model_used=str(d["model_used"]),
         prompt_tokens=int(d["prompt_tokens"]),
         completion_tokens=int(d["completion_tokens"]),
-        cost_usd=float(d["cost_usd"]),
+        cost_usd=Decimal(str(d["cost_usd"])),
         rerouted=bool(d["rerouted"]),
         elapsed_ms=float(d["elapsed_ms"]),
         stage=stage,
@@ -143,5 +144,5 @@ def _subagent_from_dict(d: dict) -> SubagentSpend:  # type: ignore[type-arg]
         actor_id=str(d["actor_id"]),
         actor_name=str(d["actor_name"]) if d.get("actor_name") is not None else None,
         calls_made=int(d["calls_made"]),
-        total_cost_usd=float(d["total_cost_usd"]),
+        total_cost_usd=Decimal(str(d["total_cost_usd"])),
     )

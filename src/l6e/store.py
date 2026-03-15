@@ -16,6 +16,7 @@ runs in ``runs.jsonl`` and any downstream analytics.
 from __future__ import annotations
 
 import threading
+from decimal import Decimal
 
 from l6e._protocols import ICostEstimator
 from l6e._types import CallRecord, PipelinePolicy, RunSummary
@@ -46,8 +47,8 @@ class InMemoryRunStore:
         self._estimator = estimator
         self._source = source
         self._records: list[CallRecord] = []
-        self._total_cost: float = 0.0
-        self._counterfactual_cost: float = 0.0
+        self._total_cost: Decimal = Decimal("0")
+        self._counterfactual_cost: Decimal = Decimal("0")
         self._lock = threading.Lock()
 
     # --- IRunStore protocol ---
@@ -77,19 +78,19 @@ class InMemoryRunStore:
             else:
                 self._counterfactual_cost += record.cost_usd
 
-    def spent(self) -> float:
+    def spent(self) -> Decimal:
         return self._total_cost
 
-    def remaining(self) -> float:
+    def remaining(self) -> Decimal:
         """Return the remaining budget in USD (budget minus total cost so far)."""
-        return self._policy.budget - self._total_cost
+        return Decimal(str(self._policy.budget)) - self._total_cost
 
     def call_count(self) -> int:
         return len(self._records)
 
     def to_summary(self) -> RunSummary:
         reroutes = sum(1 for r in self._records if r.rerouted)
-        savings = max(0.0, self._counterfactual_cost - self._total_cost)
+        savings = max(Decimal("0"), self._counterfactual_cost - self._total_cost)
         return RunSummary(
             run_id=self._run_id,
             policy=self._policy,

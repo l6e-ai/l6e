@@ -1,6 +1,8 @@
 """Unit tests for gate.py — ConstraintGate decision logic."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from l6e._types import BudgetMode, PipelinePolicy, StageRoutingHint
 from tests.conftest import FakeRouter, FakeStore
 
@@ -11,8 +13,22 @@ def make_gate(policy: PipelinePolicy, router: FakeRouter | None = None):
     return ConstraintGate(policy=policy, router=router or FakeRouter())
 
 
-def check(gate, store, *, model: str = "gpt-4o", cost: float = 0.01, stage: str | None = None):
-    return gate.check(store, model=model, estimated_cost=cost, stage=stage, complexity=None)
+def check(
+    gate,
+    store,
+    *,
+    model: str = "gpt-4o",
+    cost: Decimal = Decimal("0.01"),
+    stage: str | None = None,
+    complexity: float | None = None,
+):
+    return gate.check(
+        store, 
+        model=model, 
+        estimated_cost=cost, 
+        stage=stage, 
+        complexity=complexity,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -166,9 +182,8 @@ def test_estimated_cost_would_exceed_budget_halts() -> None:
     """estimated_cost alone would push spend over budget → halt regardless of mode."""
     policy = PipelinePolicy(budget=1.00, budget_mode=BudgetMode.REROUTE)
     gate = make_gate(policy, FakeRouter(model="ollama/qwen2.5:7b"))
-    # spent=0.90, estimated_cost=0.20 → total=1.10 > budget=1.00
     store = FakeStore(budget=1.00, spent_amount=0.90)
-    decision = check(gate, store, cost=0.20)
+    decision = check(gate, store, cost=Decimal("0.20"))
 
     assert decision.action == "halt"
 
@@ -242,9 +257,8 @@ def test_cloud_frontier_stage_halts_when_call_would_exceed_budget() -> None:
         stage_routing={"reasoning": StageRoutingHint.CLOUD_FRONTIER},
     )
     gate = make_gate(policy)
-    # spent=0.90, estimated_cost=0.20 → 1.10 > 1.00
     store = FakeStore(budget=1.00, spent_amount=0.90)
-    decision = check(gate, store, cost=0.20, stage="reasoning")
+    decision = check(gate, store, cost=Decimal("0.20"), stage="reasoning")
 
     assert decision.action == "halt"
 
@@ -257,6 +271,16 @@ def test_cloud_standard_stage_halts_when_call_would_exceed_budget() -> None:
     )
     gate = make_gate(policy)
     store = FakeStore(budget=1.00, spent_amount=0.90)
-    decision = check(gate, store, cost=0.20, stage="drafting")
+    decision = check(gate, store, cost=Decimal("0.20"), stage="drafting")
 
     assert decision.action == "halt"
+
+
+def test_zero_budget_always_allows() -> None:
+    """budget=0 skips pressure check entirely and always allows."""
+    policy = PipelinePolicy(budget=0, budget_mode=BudgetMode.HALT)
+    gate = make_gate(policy)
+    store = FakeStore(budget=0, spent_amount=0.0)
+    decision = check(gate, store, cost=Decimal("0.00"))
+
+    assert decision.action == "allow"

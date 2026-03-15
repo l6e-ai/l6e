@@ -9,6 +9,7 @@ import threading
 import time
 import uuid
 from collections.abc import Callable
+from decimal import Decimal
 from pathlib import Path
 from types import TracebackType
 from typing import Literal
@@ -166,8 +167,8 @@ class PipelineContext:
     def budget_status(self) -> BudgetStatus:
         """Zero-token snapshot of current pipeline economics."""
         spent = self._store.spent()
-        budget = self._policy.budget
-        pct = (spent / budget * 100.0) if budget > 0 else 0.0
+        budget = Decimal(str(self._policy.budget))
+        pct = float(spent / budget * 100) if self._policy.budget > 0 else 0.0
         summary = self._store.to_summary()
         return BudgetStatus(
             run_id=self._store.run_id,
@@ -259,7 +260,7 @@ class PipelineContext:
         if mode == OnBudgetExceeded.RAISE:
             raise BudgetExceeded(
                 spent=self._store.spent(),
-                budget=self._policy.budget,
+                budget=Decimal(str(self._policy.budget)),
                 reason=decision.reason,
             )
         if mode == OnBudgetExceeded.RETURN_FALLBACK:

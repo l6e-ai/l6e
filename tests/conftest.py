@@ -1,6 +1,8 @@
 """Shared fakes for l6e unit tests. Protocol-compliant, no mocks."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 from l6e._protocols import IConstraintGate, ICostEstimator, ILocalRouter, IRunStore
 from l6e._types import (
     CallRecord,
@@ -17,11 +19,11 @@ class FakeStore:
     def __init__(
         self,
         budget: float,
-        spent_amount: float,
+        spent_amount: Decimal | float,
         run_id: str = "fake-run-id",
     ) -> None:
         self._budget = budget
-        self._spent = spent_amount
+        self._spent = Decimal(str(spent_amount))
         self._run_id = run_id
         self._records: list[CallRecord] = []
 
@@ -36,11 +38,11 @@ class FakeStore:
     def record_call(self, record: CallRecord) -> None:
         self._records.append(record)
 
-    def spent(self) -> float:
+    def spent(self) -> Decimal:
         return self._spent
 
-    def remaining(self) -> float:
-        return self._budget - self._spent
+    def remaining(self) -> Decimal:
+        return Decimal(str(self._budget)) - self._spent
 
     def call_count(self) -> int:
         return len(self._records)
@@ -52,7 +54,7 @@ class FakeStore:
             total_cost=self._spent,
             calls_made=len(self._records),
             reroutes=0,
-            savings_usd=0.0,
+            savings_usd=Decimal("0"),
             records=tuple(self._records),
         )
 
@@ -73,10 +75,10 @@ class FakeRouter:
 class FakeCostEstimator:
     """Fake ICostEstimator for unit tests."""
 
-    def __init__(self, cost: float = 0.01) -> None:
-        self._cost = cost
+    def __init__(self, cost: Decimal | float = Decimal("0.01")) -> None:
+        self._cost = Decimal(str(cost))
 
-    def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    def estimate(self, model: str, prompt_tokens: int, completion_tokens: int) -> Decimal:
         return self._cost
 
 
@@ -90,7 +92,7 @@ class FakeGate:
         self,
         store: IRunStore,
         model: str,
-        estimated_cost: float,
+        estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
     ) -> GateDecision:
@@ -109,7 +111,7 @@ class SpyGate:
         self,
         store: IRunStore,
         model: str,
-        estimated_cost: float,
+        estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
     ) -> GateDecision:

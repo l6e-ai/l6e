@@ -1,16 +1,18 @@
 """l6e exceptions."""
 from __future__ import annotations
 
+from decimal import Decimal
+
 
 class BudgetExceeded(Exception):
     """Raised when a pipeline run has exhausted its budget and halt mode is active."""
 
-    def __init__(self, spent: float, budget: float, reason: str = "") -> None:
+    def __init__(self, spent: Decimal, budget: Decimal, reason: str = "") -> None:
         self.spent = spent
         self.budget = budget
         self.reason = reason
         super().__init__(
-            f"Budget exceeded: spent ${spent:.6f} of ${budget:.6f} budget. {reason}".strip()
+            f"Budget exceeded: spent ${spent} of ${budget:.6f} budget. {reason}".strip()
         )
 
 
