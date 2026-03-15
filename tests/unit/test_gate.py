@@ -274,3 +274,13 @@ def test_cloud_standard_stage_halts_when_call_would_exceed_budget() -> None:
     decision = check(gate, store, cost=Decimal("0.20"), stage="drafting")
 
     assert decision.action == "halt"
+
+
+def test_zero_budget_always_allows() -> None:
+    """budget=0 skips pressure check entirely and always allows."""
+    policy = PipelinePolicy(budget=0, budget_mode=BudgetMode.HALT)
+    gate = make_gate(policy)
+    store = FakeStore(budget=0, spent_amount=0.0)
+    decision = check(gate, store, cost=Decimal("0.00"))
+
+    assert decision.action == "allow"
