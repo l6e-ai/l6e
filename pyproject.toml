@@ -1,9 +1,9 @@
 [project]
 name = "l6e"
-version = "0.2.0"
+version = "0.2.1"
 description = "Per-run budget enforcement and model routing for AI agent pipelines."
 readme = "README.md"
-license = "Apache-2.0"
+license = "MIT"
 license-files = ["LICEN[CS]E*"]
 authors = [{ name = "l6e AI", email = "hello@l6e.ai" }]
 classifiers = [

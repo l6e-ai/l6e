@@ -11,7 +11,7 @@ LiteLLM and Portkey enforce budgets per API key or per user — not per pipeline
 
 l6e sits between your orchestrator and your router, enforces a budget across the whole run, and automatically routes to cheaper model tiers before you overspend.
 
-Using Claude Code, Cursor, or another MCP client? Check out [l6e-mcp (Apache 2.0)](https://github.com/l6e-ai/l6e-mcp).
+Using Claude Code, Cursor, or another MCP client? Check out [l6e-mcp (MIT)](https://github.com/l6e-ai/l6e-mcp).
 
 ---
 
@@ -235,4 +235,4 @@ Each record includes `model_requested`, `model_used`, `stage`, `prompt_complexit
 
 ## License
 
-Apache 2.0
+MIT
