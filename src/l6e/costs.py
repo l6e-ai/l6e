@@ -1,13 +1,18 @@
 """LiteLLM-backed cost estimator."""
 from __future__ import annotations
 
+import logging
 import re
+import threading
 import warnings
 from dataclasses import dataclass
 from decimal import Decimal
 from typing import Literal
 
 import litellm
+from litellm.litellm_core_utils.get_model_cost_map import GetModelCostMap
+
+_logger = logging.getLogger(__name__)
 
 # Tokens stripped from LiteLLM key strings before subset matching.
 # Date tokens (≥5 consecutive digits) and "latest" are noise that would
@@ -190,3 +195,40 @@ class LiteLLMCostEstimator:
             model_pricing_known=False,
             resolved_model=None,
         )
+
+
+# ---------------------------------------------------------------------------
+# Background refresh of litellm's model cost map
+# ---------------------------------------------------------------------------
+
+_refresh_started = False
+
+
+def refresh_model_cost_map_async() -> None:
+    """Fetch the remote model cost map in a background thread and merge it
+    into ``litellm.model_cost``.
+
+    Safe to call multiple times — only the first invocation spawns a thread.
+    On any failure the local (bundled) map remains in effect.
+    """
+    global _refresh_started, _LITELLM_BARE_KEYS  # noqa: PLW0603
+    if _refresh_started:
+        return
+    _refresh_started = True
+
+    def _fetch() -> None:
+        global _LITELLM_BARE_KEYS  # noqa: PLW0603
+        try:
+            url = litellm.model_cost_map_url
+            fetched = GetModelCostMap.fetch_remote_model_cost_map(url, timeout=10)
+            backup_count = GetModelCostMap._get_backup_model_count()
+            if GetModelCostMap.validate_model_cost_map(fetched, backup_count):
+                litellm.model_cost.update(fetched)
+                _LITELLM_BARE_KEYS = None  # invalidate fuzzy-resolver cache
+                _logger.debug("l6e: refreshed litellm model cost map from %s", url)
+            else:
+                _logger.debug("l6e: remote model cost map failed validation, keeping local")
+        except Exception:
+            _logger.debug("l6e: background model cost map refresh failed", exc_info=True)
+
+    threading.Thread(target=_fetch, daemon=True, name="l6e-cost-map-refresh").start()

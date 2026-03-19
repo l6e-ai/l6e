@@ -210,3 +210,157 @@ def test_estimator_resolved_cost_is_nonzero() -> None:
         completion_tokens=500,
     )
     assert cost > 0.0
+
+
+# ---------------------------------------------------------------------------
+# refresh_model_cost_map_async — unit tests
+# ---------------------------------------------------------------------------
+
+
+def test_refresh_updates_model_cost_dict(monkeypatch: object) -> None:
+    """After a successful background refresh, litellm.model_cost contains the new entries."""
+    import threading
+
+    import litellm
+
+    import l6e.costs as costs_mod
+
+    # Reset module state so the refresh can run again.
+    costs_mod._refresh_started = False
+    costs_mod._LITELLM_BARE_KEYS = None
+
+    fake_remote = {"fake-test-model-xyz": {"input_cost_per_token": 0.001}}
+
+    # Patch the fetch to return our fake data and validation to pass.
+    with (
+        patch(
+            "l6e.costs.GetModelCostMap.fetch_remote_model_cost_map",
+            return_value=fake_remote,
+        ),
+        patch(
+            "l6e.costs.GetModelCostMap.validate_model_cost_map",
+            return_value=True,
+        ),
+    ):
+        costs_mod.refresh_model_cost_map_async()
+        # Wait for the background thread to finish.
+        for t in threading.enumerate():
+            if t.name == "l6e-cost-map-refresh":
+                t.join(timeout=5)
+
+    assert "fake-test-model-xyz" in litellm.model_cost
+    # Clean up.
+    litellm.model_cost.pop("fake-test-model-xyz", None)
+
+
+def test_refresh_invalidates_bare_key_cache() -> None:
+    """After refresh, the fuzzy resolver cache is cleared so new models are found."""
+    import threading
+
+    import l6e.costs as costs_mod
+
+    # Prime the cache.
+    costs_mod._LITELLM_BARE_KEYS = [("dummy",)]
+    costs_mod._refresh_started = False
+
+    fake_remote = {"new-model": {"input_cost_per_token": 0.001}}
+
+    with (
+        patch(
+            "l6e.costs.GetModelCostMap.fetch_remote_model_cost_map",
+            return_value=fake_remote,
+        ),
+        patch(
+            "l6e.costs.GetModelCostMap.validate_model_cost_map",
+            return_value=True,
+        ),
+    ):
+        costs_mod.refresh_model_cost_map_async()
+        for t in threading.enumerate():
+            if t.name == "l6e-cost-map-refresh":
+                t.join(timeout=5)
+
+    assert costs_mod._LITELLM_BARE_KEYS is None
+
+
+def test_refresh_skips_on_validation_failure() -> None:
+    """If the fetched map fails validation, model_cost is not modified."""
+    import threading
+
+    import litellm
+
+    import l6e.costs as costs_mod
+
+    costs_mod._refresh_started = False
+    original_keys = set(litellm.model_cost.keys())
+
+    with (
+        patch(
+            "l6e.costs.GetModelCostMap.fetch_remote_model_cost_map",
+            return_value={"bad": {}},
+        ),
+        patch(
+            "l6e.costs.GetModelCostMap.validate_model_cost_map",
+            return_value=False,
+        ),
+    ):
+        costs_mod.refresh_model_cost_map_async()
+        for t in threading.enumerate():
+            if t.name == "l6e-cost-map-refresh":
+                t.join(timeout=5)
+
+    assert set(litellm.model_cost.keys()) == original_keys
+
+
+def test_refresh_only_runs_once() -> None:
+    """Calling refresh_model_cost_map_async multiple times only spawns one thread."""
+    import threading
+
+    import l6e.costs as costs_mod
+
+    costs_mod._refresh_started = False
+
+    call_count = 0
+
+    def counting_fetch(*args, **kwargs):
+        nonlocal call_count
+        call_count += 1
+        return {}
+
+    with (
+        patch(
+            "l6e.costs.GetModelCostMap.fetch_remote_model_cost_map",
+            side_effect=counting_fetch,
+        ),
+        patch(
+            "l6e.costs.GetModelCostMap.validate_model_cost_map",
+            return_value=False,
+        ),
+    ):
+        costs_mod.refresh_model_cost_map_async()
+        costs_mod.refresh_model_cost_map_async()
+        costs_mod.refresh_model_cost_map_async()
+        for t in threading.enumerate():
+            if t.name == "l6e-cost-map-refresh":
+                t.join(timeout=5)
+
+    assert call_count == 1
+
+
+def test_refresh_swallows_fetch_exception() -> None:
+    """Network errors in the background thread don't propagate."""
+    import threading
+
+    import l6e.costs as costs_mod
+
+    costs_mod._refresh_started = False
+
+    with patch(
+        "l6e.costs.GetModelCostMap.fetch_remote_model_cost_map",
+        side_effect=Exception("network down"),
+    ):
+        costs_mod.refresh_model_cost_map_async()
+        for t in threading.enumerate():
+            if t.name == "l6e-cost-map-refresh":
+                t.join(timeout=5)
+    # No exception raised — test passes if we get here.
