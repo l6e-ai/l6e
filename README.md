@@ -5,13 +5,9 @@
 [![mypy](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/mypy.yml)
 [![ruff](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml/badge.svg?branch=main)](https://github.com/l6e-ai/l6e/actions/workflows/ruff.yml)
 
-**Per-run budget enforcement and model routing for AI agent pipelines.**
+l6e gives your AI coding agent a budget. Set a dollar limit per task, and your agent will checkpoint before expensive operations, get halt signals when it's spending too much, and give you a structured cost-aware workflow. No proxy, no SDK — just an MCP server that works with Cursor, Claude Code, and Windsurf. Import your billing data and l6e learns your cost patterns — the more you use it, the tighter the calibration gets.
 
-LiteLLM and Portkey enforce budgets per API key or per user — not per pipeline run. There's no way to say "this CrewAI crew gets $0.50 for this run, reroute to local models when it's running low."
-
-l6e sits between your orchestrator and your router, enforces a budget across the whole run, and automatically routes to cheaper model tiers before you overspend.
-
-Using Claude Code, Cursor, or another MCP client? Check out [l6e-mcp (MIT)](https://github.com/l6e-ai/l6e-mcp).
+l6e is a budget enforcement runtime for AI agents. Most users interact with it through [l6e-mcp](https://github.com/l6e-ai/l6e-mcp), the MCP server for Cursor, Claude Code, and Windsurf. This package is the core library for developers embedding budget enforcement directly into Python agent pipelines.
 
 ---
 
@@ -29,7 +25,11 @@ pip install 'l6e[langchain]'
 
 ---
 
-## Quickstart: Universal wrapper
+## For pipeline and framework developers
+
+l6e sits between your orchestrator and your router, enforces a budget across the whole run, and automatically routes to cheaper model tiers before you overspend. LiteLLM and Portkey enforce budgets per API key or per user — not per pipeline run. l6e enforces per-run.
+
+### Universal wrapper
 
 Works with any LLM client — LiteLLM, raw OpenAI SDK, anything callable.
 
@@ -58,9 +58,9 @@ print(ctx.budget_status())
 
 ---
 
-## LangChain: zero pipeline code changes
+### LangChain adapter
 
-Attach `L6eCallbackHandler` to any existing chain. Annotate stages with a tag.
+Zero pipeline code changes. Attach `L6eCallbackHandler` to any existing chain and annotate stages with a tag.
 
 ```python
 import l6e
@@ -97,7 +97,7 @@ See [`examples/langchain_demo.ipynb`](examples/langchain_demo.ipynb) for a compl
 
 ---
 
-## CrewAI: halt enforcement only (v0.1)
+### CrewAI adapter (v0.1 — halt only)
 
 Attach `L6eStepCallback` to stop a crew when the budget is exhausted.
 
@@ -124,7 +124,7 @@ Full per-call cost tracking for CrewAI is planned for v0.2.
 
 ---
 
-## Agents can read budget state and adapt
+### Reading budget state mid-run
 
 `ctx.budget_status()` returns a snapshot of the current run's economics — `spent_usd`, `remaining_usd`, `budget_pressure`, `reroutes`, `calls_made`. Your agent can call it at any point mid-run and branch on the result:
 
@@ -146,7 +146,7 @@ with l6e.pipeline(policy) as ctx:
 
 ---
 
-## Declare your policy in TOML
+### TOML policy files
 
 ```toml
 # l6e-policy.toml
@@ -177,7 +177,7 @@ with l6e.pipeline(policy=policy) as ctx:
 
 ---
 
-## How it fits in your stack
+### How it fits in your stack
 
 ```
 Your stack today:
@@ -203,7 +203,7 @@ l6e does not replace LiteLLM or your existing router. It adds pipeline-run conte
 
 ---
 
-## Local model rerouting
+### Local model rerouting
 
 When `stage_routing` declares a stage as `"local"` and budget pressure triggers a reroute, l6e detects your hardware and picks the best available Ollama model automatically — no configuration required.
 
@@ -219,7 +219,7 @@ On machines without Ollama, `LOCAL` stages fall back to the global `budget_mode`
 
 ---
 
-## Run log
+### Run log
 
 Every `RunSummary` is appended to `.l6e/runs.jsonl` on context exit — automatically, no extra code required.
 
