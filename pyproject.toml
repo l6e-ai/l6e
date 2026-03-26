@@ -5,7 +5,7 @@ description = "Per-run budget enforcement and model routing for AI agent pipelin
 readme = "README.md"
 license = "MIT"
 license-files = ["LICEN[CS]E*"]
-authors = [{ name = "l6e AI", email = "hello@l6e.ai" }]
+authors = [{ name = "L6E AI, LLC", email = "hello@l6e.ai" }]
 classifiers = [
     "Development Status :: 3 - Alpha",
     "Programming Language :: Python :: 3",
