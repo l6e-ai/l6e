@@ -1,6 +1,6 @@
 [project]
 name = "l6e"
-version = "0.2.4"
+version = "0.2.5"
 description = "Per-run budget enforcement and model routing for AI agent pipelines."
 readme = "README.md"
 license = "MIT"
