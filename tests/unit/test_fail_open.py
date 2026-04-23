@@ -296,6 +296,18 @@ class TestPolicyValidation:
         with pytest.raises(ValueError, match="finite"):
             PipelinePolicy(budget=float("inf"))
 
+    def test_rejects_non_number_budget(self) -> None:
+        """A string that slips past the ``float`` annotation at runtime
+        must be rejected — the dataclass type hint is advisory only."""
+        with pytest.raises(ValueError, match="must be a number"):
+            PipelinePolicy(budget="five")  # type: ignore[arg-type]
+
+    def test_rejects_bool_budget(self) -> None:
+        """``bool`` is a subclass of ``int`` — reject explicitly so
+        ``budget=True`` doesn't silently parse as 1.0."""
+        with pytest.raises(ValueError, match="must be a number"):
+            PipelinePolicy(budget=True)  # type: ignore[arg-type]
+
     def test_rejects_reroute_threshold_above_one(self) -> None:
         with pytest.raises(ValueError, match="reroute_threshold"):
             PipelinePolicy(budget=1.0, reroute_threshold=2.0)
@@ -304,9 +316,48 @@ class TestPolicyValidation:
         with pytest.raises(ValueError, match="reroute_threshold"):
             PipelinePolicy(budget=1.0, reroute_threshold=-0.1)
 
+    def test_rejects_non_number_reroute_threshold(self) -> None:
+        with pytest.raises(ValueError, match="reroute_threshold must be a number"):
+            PipelinePolicy(budget=1.0, reroute_threshold="loose")  # type: ignore[arg-type]
+
+    def test_rejects_bool_reroute_threshold(self) -> None:
+        with pytest.raises(ValueError, match="reroute_threshold must be a number"):
+            PipelinePolicy(budget=1.0, reroute_threshold=False)  # type: ignore[arg-type]
+
+    def test_rejects_nan_reroute_threshold(self) -> None:
+        with pytest.raises(ValueError, match="reroute_threshold must be finite"):
+            PipelinePolicy(budget=1.0, reroute_threshold=float("nan"))
+
+    def test_rejects_inf_reroute_threshold(self) -> None:
+        with pytest.raises(ValueError, match="reroute_threshold must be finite"):
+            PipelinePolicy(budget=1.0, reroute_threshold=float("inf"))
+
     def test_rejects_negative_unknown_model_cost(self) -> None:
         with pytest.raises(ValueError, match="unknown_model_cost"):
             PipelinePolicy(budget=1.0, unknown_model_cost_per_1k_tokens=-0.01)
+
+    def test_rejects_nan_unknown_model_cost(self) -> None:
+        with pytest.raises(ValueError, match="unknown_model_cost"):
+            PipelinePolicy(
+                budget=1.0,
+                unknown_model_cost_per_1k_tokens=float("nan"),
+            )
+
+    def test_rejects_negative_latency_sla(self) -> None:
+        with pytest.raises(ValueError, match="latency_sla"):
+            PipelinePolicy(budget=1.0, latency_sla=-0.5)
+
+    def test_rejects_nan_latency_sla(self) -> None:
+        with pytest.raises(ValueError, match="latency_sla"):
+            PipelinePolicy(budget=1.0, latency_sla=float("nan"))
+
+    def test_rejects_inf_latency_sla(self) -> None:
+        with pytest.raises(ValueError, match="latency_sla"):
+            PipelinePolicy(budget=1.0, latency_sla=float("inf"))
+
+    def test_accepts_finite_latency_sla(self) -> None:
+        pol = PipelinePolicy(budget=1.0, latency_sla=2.5)
+        assert pol.latency_sla == 2.5
 
     def test_accepts_zero_budget(self) -> None:
         """Zero budget is a legitimate "observe-only" mode — everything
@@ -369,6 +420,120 @@ def test_happy_path_unaffected_by_fail_open_wrappers() -> None:
 # ---------------------------------------------------------------------------
 # CI fence: enumerate every public method and prove it never raises
 # ---------------------------------------------------------------------------
+
+
+# ---------------------------------------------------------------------------
+# Edge cases in the fail-open guards themselves (coverage for the
+# inner except branches — these paths are only reachable when a
+# collaborator misbehaves in a specific way).
+# ---------------------------------------------------------------------------
+
+
+class _PromptWithBrokenStr:
+    """Raises from __str__, simulating a poorly-behaved caller prompt."""
+
+    def __str__(self) -> str:
+        raise RuntimeError("__str__ exploded")
+
+
+def test_estimate_prompt_tokens_returns_one_when_str_raises() -> None:
+    """Covers the ``"\\n".join`` exception branch in ``_estimate_prompt_tokens``."""
+    from l6e.pipeline import _estimate_prompt_tokens
+
+    result = _estimate_prompt_tokens([_PromptWithBrokenStr()])  # type: ignore[list-item]
+    assert result == 1
+
+
+def test_record_covers_extract_token_usage_exception_branch(monkeypatch) -> None:
+    """Covers the ``except`` branch around ``extract_token_usage``.
+
+    ``extract_token_usage`` is itself defensive, so we monkeypatch it to
+    force the branch. Name-clash note: ``l6e.pipeline`` resolves to the
+    ``pipeline()`` factory function because of the module's public
+    re-exports, so we patch via ``sys.modules``.
+    """
+    import sys
+
+    pipeline_module = sys.modules["l6e.pipeline"]
+
+    def _boom(_response: object) -> tuple[int, int]:
+        raise RuntimeError("extract exploded")
+
+    monkeypatch.setattr(pipeline_module, "extract_token_usage", _boom)
+
+    ctx = _make_ctx()
+    record = ctx.record(
+        model_requested="gpt-4o",
+        model_used="gpt-4o",
+        response=_FAKE_RESPONSE,
+        elapsed_ms=1.0,
+    )
+    assert record.prompt_tokens == 0
+    assert record.completion_tokens == 0
+
+
+class _BrokenMessages(list):
+    """List whose iteration yields items whose ``.get`` raises.
+
+    Forces the ``except`` branch in ``call()`` that extracts prompts.
+    """
+
+    def __iter__(self):  # type: ignore[override]
+        yield _BrokenMessage()
+
+
+class _BrokenMessage:
+    def get(self, *args, **kwargs):  # noqa: D401 — dict-like stub
+        raise RuntimeError("message.get exploded")
+
+
+def test_call_survives_broken_messages_iterable() -> None:
+    """Covers lines 370-372: ``prompts = [...]`` raising on .get."""
+    ctx = _make_ctx()
+    resp = ctx.call(fn=_fn_echo, model="gpt-4o", messages=_BrokenMessages())
+    assert resp["model"] == "gpt-4o"
+
+
+def test_call_survives_subclass_advise_raising() -> None:
+    """Covers lines 388-390: a subclass whose ``advise`` raises."""
+
+    class _BadCtx(PipelineContext):
+        def advise(self, *args: Any, **kwargs: Any) -> GateDecision:  # type: ignore[override]
+            raise RuntimeError("subclass advise exploded")
+
+    pol = PipelinePolicy(budget=1.0)
+    ctx = _BadCtx(
+        run_id="t",
+        policy=pol,
+        gate=FakeGate(_ALLOW),
+        store=FakeStore(budget=pol.budget, spent_amount=0.0),
+        log=FakeLog(),
+        classifier=PromptComplexityClassifier(),
+        estimator=FakeCostEstimator(cost=0.01),
+    )
+    resp = ctx.call(fn=_fn_echo, model="gpt-4o", messages=_MESSAGES)
+    assert resp["model"] == "gpt-4o"
+
+
+def test_call_survives_subclass_record_raising() -> None:
+    """Covers lines 424-425: a subclass whose ``record`` raises."""
+
+    class _BadCtx(PipelineContext):
+        def record(self, *args: Any, **kwargs: Any) -> CallRecord:  # type: ignore[override]
+            raise RuntimeError("subclass record exploded")
+
+    pol = PipelinePolicy(budget=1.0)
+    ctx = _BadCtx(
+        run_id="t",
+        policy=pol,
+        gate=FakeGate(_ALLOW),
+        store=FakeStore(budget=pol.budget, spent_amount=0.0),
+        log=FakeLog(),
+        classifier=PromptComplexityClassifier(),
+        estimator=FakeCostEstimator(cost=0.01),
+    )
+    resp = ctx.call(fn=_fn_echo, model="gpt-4o", messages=_MESSAGES)
+    assert resp["model"] == "gpt-4o"
 
 
 def test_no_public_method_raises_with_fully_broken_collaborators() -> None:
