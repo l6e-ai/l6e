@@ -9,18 +9,18 @@
 | src/l6e/\_log.py                 |       50 |        0 |     100% |           |
 | src/l6e/\_protocols.py           |       20 |        0 |     100% |           |
 | src/l6e/\_response.py            |       48 |        0 |     100% |           |
-| src/l6e/\_types.py               |      107 |        0 |     100% |           |
+| src/l6e/\_types.py               |      110 |        0 |     100% |           |
 | src/l6e/adapters/\_\_init\_\_.py |        0 |        0 |     100% |           |
 | src/l6e/adapters/crewai.py       |       12 |        0 |     100% |           |
 | src/l6e/adapters/langchain.py    |       58 |        0 |     100% |           |
 | src/l6e/adapters/universal.py    |        3 |        0 |     100% |           |
 | src/l6e/costs.py                 |       89 |        0 |     100% |           |
 | src/l6e/exceptions.py            |       13 |        0 |     100% |           |
-| src/l6e/gate.py                  |       52 |        0 |     100% |           |
+| src/l6e/gate.py                  |       53 |        0 |     100% |           |
 | src/l6e/pipeline.py              |      106 |        0 |     100% |           |
 | src/l6e/router.py                |       30 |        0 |     100% |           |
 | src/l6e/store.py                 |       41 |        0 |     100% |           |
-| **TOTAL**                        |  **678** |    **0** | **100%** |           |
+| **TOTAL**                        |  **682** |    **0** | **100%** |           |
 
 
 ## Setup coverage badge
