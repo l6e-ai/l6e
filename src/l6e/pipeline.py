@@ -2,9 +2,18 @@
 
 Wires gate, store, estimator, classifier, and log together.
 No LLM calls live here — adapters execute, PipelineContext advises and records.
+
+Iron rule: **the gate fails open, always.** Every public entry point
+(`advise`, `call`, `record`, `budget_status`, `run_summary`, `__exit__`)
+wraps its internals so an unexpected exception in l6e collaborators never
+propagates into customer code. A crashed gate degrades to an "allow" pass
+through to the customer's original model request. See
+``pivot-docs/cost-benchmark-margin-thesis/05-integration-architecture.md``
+and ``docs/runbooks/fails-open-matrix.md``.
 """
 from __future__ import annotations
 
+import logging
 import threading
 import time
 import uuid
@@ -29,10 +38,21 @@ from l6e._types import (
 )
 from l6e.exceptions import BudgetExceeded
 
+_logger = logging.getLogger(__name__)
+
+# Reason strings published on fail-open GateDecisions so operators can
+# pivot on them in logs / dashboards. Keep stable — they're part of the
+# telemetry contract.
+_FAIL_OPEN_REASON = "fail_open:gate_exception"
+_FAIL_OPEN_RECORD_REASON = "fail_open:record_exception"
+
 
 def _estimate_prompt_tokens(prompts: list[str]) -> int:
     """Best-effort prompt token estimate via tiktoken, fallback to char/4."""
-    text = "\n".join(prompts)
+    try:
+        text = "\n".join(str(p) for p in prompts)
+    except Exception:
+        return 1
     try:
         import tiktoken
 
@@ -103,13 +123,36 @@ class PipelineContext:
         exc_val: BaseException | None,
         exc_tb: TracebackType | None,
     ) -> Literal[False]:
-        """Always write the run log, even on exception. Never suppresses."""
-        self._log.append(self._store.to_summary())
+        """Always attempt to write the run log, even on exception. Never suppresses.
+
+        Log append failures are swallowed — disk full or a broken log
+        writer must not mask (or inject) an exception into the caller's
+        ``with`` block.
+        """
+        try:
+            summary = self._store.to_summary()
+        except Exception:
+            _logger.warning("l6e_store_summary_failed", exc_info=True)
+            return False
+        try:
+            self._log.append(summary)
+        except Exception:
+            _logger.warning("l6e_run_log_append_failed", exc_info=True)
         return False
 
     # ------------------------------------------------------------------
     # Core methods
     # ------------------------------------------------------------------
+
+    def _safe_classify(
+        self, prompts: list[str], stage: str | None
+    ) -> PromptComplexity | None:
+        """Best-effort classification. A broken classifier never raises."""
+        try:
+            return self._classifier.classify(prompts[0] if prompts else "", stage)
+        except Exception:
+            _logger.warning("l6e_classifier_failed", exc_info=True)
+            return None
 
     def advise(
         self,
@@ -125,20 +168,32 @@ class PipelineContext:
 
         ``user_id`` / ``tenant_id`` / ``cohort_hint`` are Margin-tier identity
         hints forwarded to the gate. Pure local gates ignore them.
+
+        Fail-open contract: any exception inside the classifier, estimator,
+        or gate is logged and returns an ``allow`` decision targeting the
+        caller's requested ``model`` with reason ``fail_open:gate_exception``.
+        Enterprise deployments rely on this — the gate failing must never
+        break the customer's app.
         """
-        complexity = self._classifier.classify(prompts[0] if prompts else "", stage)
-        prompt_tokens = _estimate_prompt_tokens(prompts)
-        estimated_cost = self._estimator.estimate(model, prompt_tokens, 0)
-        return self._gate.check(
-            self._store,
-            model=model,
-            estimated_cost=estimated_cost,
-            stage=stage,
-            complexity=complexity,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            cohort_hint=cohort_hint,
-        )
+        try:
+            complexity = self._safe_classify(prompts, stage)
+            prompt_tokens = _estimate_prompt_tokens(prompts)
+            estimated_cost = self._estimator.estimate(model, prompt_tokens, 0)
+            return self._gate.check(
+                self._store,
+                model=model,
+                estimated_cost=estimated_cost,
+                stage=stage,
+                complexity=complexity,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                cohort_hint=cohort_hint,
+            )
+        except Exception:
+            _logger.warning("l6e_advise_failed_fail_open", exc_info=True)
+            return GateDecision(
+                action="allow", target_model=model, reason=_FAIL_OPEN_REASON,
+            )
 
     def record(
         self,
@@ -158,9 +213,24 @@ class PipelineContext:
 
         ``user_id`` / ``tenant_id`` / ``cohort_hint`` are persisted on the
         ``CallRecord`` for downstream telemetry (RunSummary, SaaS profiler).
+
+        Fail-open contract: any exception during token extraction, cost
+        estimation, or store write is logged and a best-effort
+        ``CallRecord`` with zeroed metrics is returned. We never re-raise
+        into customer code — by the time ``record()`` is called the
+        provider request has already succeeded; losing telemetry is
+        strictly preferable to losing the response.
         """
-        prompt_tokens, completion_tokens = extract_token_usage(response)
-        cost = self._estimator.estimate(model_used, prompt_tokens, completion_tokens)
+        try:
+            prompt_tokens, completion_tokens = extract_token_usage(response)
+        except Exception:
+            _logger.warning("l6e_extract_token_usage_failed", exc_info=True)
+            prompt_tokens, completion_tokens = 0, 0
+        try:
+            cost = self._estimator.estimate(model_used, prompt_tokens, completion_tokens)
+        except Exception:
+            _logger.warning("l6e_cost_estimate_failed", exc_info=True)
+            cost = Decimal("0")
         with self._lock:
             call_index = self._call_index
             self._call_index += 1
@@ -179,29 +249,66 @@ class PipelineContext:
             tenant_id=tenant_id,
             cohort_hint=cohort_hint,
         )
-        self._store.record_call(record)
+        try:
+            self._store.record_call(record)
+        except Exception:
+            _logger.warning("l6e_store_record_failed", exc_info=True)
         return record
 
     def run_summary(self) -> RunSummary:
-        """Full record of every call made in this pipeline run."""
-        return self._store.to_summary()
+        """Full record of every call made in this pipeline run.
+
+        If the store is broken, returns an empty summary instead of
+        raising — this method is agent-queryable and must not throw.
+        """
+        try:
+            return self._store.to_summary()
+        except Exception:
+            _logger.warning("l6e_run_summary_failed", exc_info=True)
+            return RunSummary(
+                run_id=self._run_id,
+                policy=self._policy,
+                total_cost=Decimal("0"),
+                calls_made=0,
+                reroutes=0,
+                savings_usd=Decimal("0"),
+                records=(),
+            )
 
     def budget_status(self) -> BudgetStatus:
-        """Zero-token snapshot of current pipeline economics."""
-        spent = self._store.spent()
-        budget = Decimal(str(self._policy.budget))
-        pct = float(spent / budget * 100) if self._policy.budget > 0 else 0.0
-        summary = self._store.to_summary()
-        return BudgetStatus(
-            run_id=self._store.run_id,
-            spent_usd=spent,
-            remaining_usd=self._store.remaining(),
-            budget_usd=budget,
-            calls_made=self._store.call_count(),
-            reroutes=summary.reroutes,
-            pct_used=pct,
-            budget_pressure=_pressure(pct),
-        )
+        """Zero-token snapshot of current pipeline economics.
+
+        Fail-safe: if any collaborator is broken, returns a conservative
+        "budget healthy" snapshot so agents can keep running.
+        """
+        try:
+            spent = self._store.spent()
+            budget = Decimal(str(self._policy.budget))
+            pct = float(spent / budget * 100) if self._policy.budget > 0 else 0.0
+            summary = self._store.to_summary()
+            return BudgetStatus(
+                run_id=self._store.run_id,
+                spent_usd=spent,
+                remaining_usd=self._store.remaining(),
+                budget_usd=budget,
+                calls_made=self._store.call_count(),
+                reroutes=summary.reroutes,
+                pct_used=pct,
+                budget_pressure=_pressure(pct),
+            )
+        except Exception:
+            _logger.warning("l6e_budget_status_failed", exc_info=True)
+            budget = Decimal(str(self._policy.budget))
+            return BudgetStatus(
+                run_id=self._run_id,
+                spent_usd=Decimal("0"),
+                remaining_usd=budget,
+                budget_usd=budget,
+                calls_made=0,
+                reroutes=0,
+                pct_used=0.0,
+                budget_pressure="low",
+            )
 
     def call(
         self,
@@ -258,19 +365,36 @@ class PipelineContext:
             BudgetExceeded: If the gate halts and
                 ``policy.on_budget_exceeded == OnBudgetExceeded.RAISE``.
         """
-        prompts = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        try:
+            prompts = [m.get("content", "") for m in messages if m.get("role") == "user"]
+        except Exception:
+            _logger.warning("l6e_prompt_extract_failed", exc_info=True)
+            prompts = [""]
         if not prompts:
             prompts = [""]
 
-        decision = self.advise(
-            model=model,
-            prompts=prompts,
-            stage=stage,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            cohort_hint=cohort_hint,
-        )
+        # ``advise`` is already fail-open; this is belt-and-braces against
+        # a caller who subclasses PipelineContext and replaces it with
+        # something that raises.
+        try:
+            decision = self.advise(
+                model=model,
+                prompts=prompts,
+                stage=stage,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                cohort_hint=cohort_hint,
+            )
+        except Exception:
+            _logger.warning("l6e_call_advise_failed_fail_open", exc_info=True)
+            decision = GateDecision(
+                action="allow", target_model=model, reason=_FAIL_OPEN_REASON,
+            )
 
+        # ``halt`` is a deliberate enforcement action, not a failure path.
+        # Only halts that the gate explicitly asked for — fail-open halts
+        # from a crashed gate can never exist because ``advise`` returns
+        # an allow in that case.
         if decision.action == "halt":
             return self._handle_halt(decision)
 
@@ -281,18 +405,24 @@ class PipelineContext:
         response = fn(model=effective_model, messages=messages)
         elapsed_ms = (time.perf_counter() - t0) * 1000.0
 
-        self.record(
-            model_requested=model,
-            model_used=effective_model,
-            response=response,
-            elapsed_ms=elapsed_ms,
-            stage=stage,
-            complexity=complexity,
-            rerouted=rerouted,
-            user_id=user_id,
-            tenant_id=tenant_id,
-            cohort_hint=cohort_hint,
-        )
+        # ``record`` is fail-open internally, but defense-in-depth: if a
+        # subclass overrides it to raise, we still must not drop the
+        # customer's response on the floor.
+        try:
+            self.record(
+                model_requested=model,
+                model_used=effective_model,
+                response=response,
+                elapsed_ms=elapsed_ms,
+                stage=stage,
+                complexity=complexity,
+                rerouted=rerouted,
+                user_id=user_id,
+                tenant_id=tenant_id,
+                cohort_hint=cohort_hint,
+            )
+        except Exception:
+            _logger.warning("l6e_call_record_failed_fail_open", exc_info=True)
         return response
 
     # ------------------------------------------------------------------
@@ -302,8 +432,13 @@ class PipelineContext:
     def _handle_halt(self, decision: GateDecision) -> object:
         mode = self._policy.on_budget_exceeded
         if mode == OnBudgetExceeded.RAISE:
+            try:
+                spent = self._store.spent()
+            except Exception:
+                _logger.warning("l6e_store_spent_failed_on_halt", exc_info=True)
+                spent = Decimal("0")
             raise BudgetExceeded(
-                spent=self._store.spent(),
+                spent=spent,
                 budget=Decimal(str(self._policy.budget)),
                 reason=decision.reason,
             )
