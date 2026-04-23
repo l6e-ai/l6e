@@ -95,6 +95,10 @@ class FakeGate:
         estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> GateDecision:
         return self._decision
 
@@ -106,6 +110,9 @@ class SpyGate:
         self._decision = decision
         self.last_stage: str | None = None
         self.last_model: str | None = None
+        self.last_user_id: str | None = None
+        self.last_tenant_id: str | None = None
+        self.last_cohort_hint: str | None = None
 
     def check(
         self,
@@ -114,9 +121,16 @@ class SpyGate:
         estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> GateDecision:
         self.last_stage = stage
         self.last_model = model
+        self.last_user_id = user_id
+        self.last_tenant_id = tenant_id
+        self.last_cohort_hint = cohort_hint
         return self._decision
 
 

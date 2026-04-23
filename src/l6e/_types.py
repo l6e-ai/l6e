@@ -149,6 +149,9 @@ class CallRecord:
     actor_id: str | None = None
     actor_name: str | None = None
     parent_call_id: str | None = None
+    user_id: str | None = None
+    tenant_id: str | None = None
+    cohort_hint: str | None = None
 
 
 @dataclass(frozen=True)

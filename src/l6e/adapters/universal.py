@@ -15,6 +15,19 @@ Usage::
             messages=[{"role": "user", "content": "Hello"}],
             stage="greeting",
         )
+
+Margin-tier identity hints are optional and forwarded to the gate and
+persisted on each ``CallRecord`` for downstream reconciliation::
+
+    response = ctx.call(
+        fn=litellm.completion,
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "Hello"}],
+        stage="greeting",
+        user_id="u_42",
+        tenant_id="acme",
+        cohort_hint="enterprise",
+    )
 """
 from __future__ import annotations
 

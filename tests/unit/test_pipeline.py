@@ -316,6 +316,35 @@ def test_call_returns_fallback_on_halt_with_fallback_mode() -> None:
     assert result == "fallback-answer"
 
 
+def test_call_plumbs_identity_kwargs_to_gate_and_record() -> None:
+    """L6E-39: user_id / tenant_id / cohort_hint reach the gate and CallRecord."""
+    from tests.conftest import SpyGate
+
+    spy = SpyGate(_ALLOW)
+    store = FakeStore(budget=1.00, spent_amount=0.0)
+    ctx = make_ctx(gate=spy, store=store)
+
+    ctx.call(
+        fn=lambda model, messages: _FAKE_RESPONSE,
+        model="gpt-4o",
+        messages=[{"role": "user", "content": "hi"}],
+        user_id="u_42",
+        tenant_id="acme",
+        cohort_hint="enterprise",
+    )
+
+    assert spy.last_user_id == "u_42"
+    assert spy.last_tenant_id == "acme"
+    assert spy.last_cohort_hint == "enterprise"
+
+    summary = store.to_summary()
+    assert len(summary.records) == 1
+    rec = summary.records[0]
+    assert rec.user_id == "u_42"
+    assert rec.tenant_id == "acme"
+    assert rec.cohort_hint == "enterprise"
+
+
 # ---------------------------------------------------------------------------
 # _estimate_prompt_tokens tiktoken failure fallback (lines 38-39)
 # ---------------------------------------------------------------------------
