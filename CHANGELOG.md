@@ -7,10 +7,14 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.1] - 2026-04-23
+### Added
+- **Iron-rule fail-open guard on every public `PipelineContext` entry point** (L6E-41). `advise`, `call`, `record`, `budget_status`, `run_summary`, and `__exit__` now catch any exception from broken collaborators (gate / classifier / estimator / store / log) and degrade to "allow" rather than raising into customer code. `ctx.call` always passes through to the provided `fn` on non-halt decisions, even when the entire gate is broken. Fail-open decisions carry `reason="fail_open:gate_exception"` for telemetry. See `docs/runbooks/fails-open-matrix.md`.
+
 ## [0.3.0] — 2026-04-23
 
 ### Added
-
+- **`PipelinePolicy` construction-time validation.** `__post_init__` rejects negative / NaN / infinite `budget`, `reroute_threshold` outside `[0.0, 1.0]`, negative `unknown_model_cost_per_1k_tokens`, and negative `latency_sla`. Silent misconfig → explicit `ValueError` at load.
 - **Margin-tier identity kwargs on `PipelineContext`** — `ctx.call()`, `ctx.advise()`, and `ctx.record()` now accept optional keyword-only `user_id`, `tenant_id`, and `cohort_hint` (all `str | None`, default `None`). They are plumbed through `ConstraintGate.check()` and persisted on `CallRecord` (and therefore `RunSummary.records`) for downstream telemetry and server-side calibrated cost reconciliation. Existing callers are unaffected.
 - **`CallRecord`** — new optional `user_id`, `tenant_id`, `cohort_hint` fields, appended after `parent_call_id`.
 
