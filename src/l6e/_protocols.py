@@ -63,6 +63,17 @@ class IConstraintGate(Protocol):
         estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> GateDecision:
-        """Decide whether to allow, reroute, or halt a pending LLM call."""
+        """Decide whether to allow, reroute, or halt a pending LLM call.
+
+        ``user_id``, ``tenant_id``, and ``cohort_hint`` are Margin-tier
+        identity hints. Pure ``ConstraintGate`` ignores them; cloud-sync or
+        cohort-aware gates may use them to select calibrated cost factors or
+        per-tenant routing policy. All three are optional and default to
+        ``None`` so pre-Margin call sites remain unchanged.
+        """
         ...

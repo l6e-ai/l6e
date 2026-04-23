@@ -45,7 +45,14 @@ class ConstraintGate:
         estimated_cost: Decimal,
         stage: str | None,
         complexity: PromptComplexity | None,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> GateDecision:
+        # Identity kwargs are accepted for protocol compatibility and future
+        # cohort-aware routing; the OSS ConstraintGate does not act on them.
+        del user_id, tenant_id, cohort_hint
         policy = self._policy
 
         # ------------------------------------------------------------------

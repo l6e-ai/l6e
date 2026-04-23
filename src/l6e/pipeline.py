@@ -116,8 +116,16 @@ class PipelineContext:
         model: str,
         prompts: list[str],
         stage: str | None = None,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> GateDecision:
-        """Gate-check a pending call. Does not execute the call."""
+        """Gate-check a pending call. Does not execute the call.
+
+        ``user_id`` / ``tenant_id`` / ``cohort_hint`` are Margin-tier identity
+        hints forwarded to the gate. Pure local gates ignore them.
+        """
         complexity = self._classifier.classify(prompts[0] if prompts else "", stage)
         prompt_tokens = _estimate_prompt_tokens(prompts)
         estimated_cost = self._estimator.estimate(model, prompt_tokens, 0)
@@ -127,6 +135,9 @@ class PipelineContext:
             estimated_cost=estimated_cost,
             stage=stage,
             complexity=complexity,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            cohort_hint=cohort_hint,
         )
 
     def record(
@@ -138,8 +149,16 @@ class PipelineContext:
         stage: str | None = None,
         complexity: PromptComplexity | None = None,
         rerouted: bool = False,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> CallRecord:
-        """Record a completed call. Extracts token usage, estimates cost, appends to store."""
+        """Record a completed call. Extracts token usage, estimates cost, appends to store.
+
+        ``user_id`` / ``tenant_id`` / ``cohort_hint`` are persisted on the
+        ``CallRecord`` for downstream telemetry (RunSummary, SaaS profiler).
+        """
         prompt_tokens, completion_tokens = extract_token_usage(response)
         cost = self._estimator.estimate(model_used, prompt_tokens, completion_tokens)
         with self._lock:
@@ -156,6 +175,9 @@ class PipelineContext:
             elapsed_ms=elapsed_ms,
             stage=stage,
             prompt_complexity=complexity,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            cohort_hint=cohort_hint,
         )
         self._store.record_call(record)
         return record
@@ -188,6 +210,10 @@ class PipelineContext:
         messages: list[dict[str, str]],
         stage: str | None = None,
         complexity: PromptComplexity | None = None,
+        *,
+        user_id: str | None = None,
+        tenant_id: str | None = None,
+        cohort_hint: str | None = None,
     ) -> object:
         """Advise on model, execute fn, record response.
 
@@ -214,6 +240,14 @@ class PipelineContext:
                 ``"review"``).  Passed through to the gate and ``CallRecord``.
             complexity: Pre-computed prompt complexity.  When ``None`` the
                 classifier derives it from the first user message.
+            user_id: Optional Margin-tier end-user identity. Forwarded to the
+                gate and persisted on ``CallRecord`` for downstream
+                telemetry. Ignored by the OSS ``ConstraintGate``.
+            tenant_id: Optional Margin-tier tenant / organisation identity.
+                Same semantics as ``user_id``.
+            cohort_hint: Optional free-form cohort label (e.g. ``"enterprise"``,
+                ``"trial"``) used by cloud-sync gates to select calibrated
+                cost factors. Persisted on ``CallRecord``.
 
         Returns:
             The raw response object returned by ``fn``, or the policy's
@@ -228,7 +262,14 @@ class PipelineContext:
         if not prompts:
             prompts = [""]
 
-        decision = self.advise(model=model, prompts=prompts, stage=stage)
+        decision = self.advise(
+            model=model,
+            prompts=prompts,
+            stage=stage,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            cohort_hint=cohort_hint,
+        )
 
         if decision.action == "halt":
             return self._handle_halt(decision)
@@ -248,6 +289,9 @@ class PipelineContext:
             stage=stage,
             complexity=complexity,
             rerouted=rerouted,
+            user_id=user_id,
+            tenant_id=tenant_id,
+            cohort_hint=cohort_hint,
         )
         return response
 

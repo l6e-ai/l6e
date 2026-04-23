@@ -7,6 +7,19 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.3.0] — 2026-04-23
+
+### Added
+
+- **Margin-tier identity kwargs on `PipelineContext`** — `ctx.call()`, `ctx.advise()`, and `ctx.record()` now accept optional keyword-only `user_id`, `tenant_id`, and `cohort_hint` (all `str | None`, default `None`). They are plumbed through `ConstraintGate.check()` and persisted on `CallRecord` (and therefore `RunSummary.records`) for downstream telemetry and server-side calibrated cost reconciliation. Existing callers are unaffected.
+- **`CallRecord`** — new optional `user_id`, `tenant_id`, `cohort_hint` fields, appended after `parent_call_id`.
+
+### Changed
+
+- **`IConstraintGate.check()` protocol** — gained three optional keyword-only kwargs (`user_id`, `tenant_id`, `cohort_hint`). The OSS `ConstraintGate` accepts and ignores them; custom gate implementations must accept them (or `**kwargs`) to stay protocol-compliant. No behavioural change for any existing deployment.
+
+---
+
 ## [0.2.0] — 2026-03-15
 
 ### Breaking changes
