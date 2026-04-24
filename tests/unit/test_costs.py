@@ -197,7 +197,6 @@ def test_family_version_fallback_prefers_newest_known_version() -> None:
     # Must be the newest opus key among candidates whose non-version tokens
     # are a subset of the input's non-version tokens — mirroring the
     # resolver's own eligibility filter.
-    import re as _re2
     input_non_version = frozenset({"claude", "opus"})
     max_version = (-1, -1)
     max_key = None
