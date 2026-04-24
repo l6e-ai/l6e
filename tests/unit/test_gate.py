@@ -3,6 +3,7 @@ from __future__ import annotations
 
 from decimal import Decimal
 
+from l6e._gate_core import GateCoreOutcome
 from l6e._types import BudgetMode, PipelinePolicy, StageRoutingHint
 from tests.conftest import FakeRouter, FakeStore
 
@@ -146,6 +147,24 @@ def test_stage_routing_local_no_local_model_halts() -> None:
 
     assert decision.action == "halt"
     assert "no_local_model" in decision.reason
+
+
+def test_materialize_reroute_without_local_requirement_halts() -> None:
+    """``decide()`` always sets ``wants_local_reroute`` for reroutes today; this
+    branch stays so future outcomes that reroute without a local target halt
+    deterministically instead of inventing a model.
+    """
+    gate = make_gate(PipelinePolicy(budget=1.0), FakeRouter(model="ollama/x"))
+    outcome = GateCoreOutcome(
+        action="reroute",
+        reason="synthetic:non_local_reroute",
+        wants_local_reroute=False,
+    )
+    decision = gate._materialize("gpt-4o", outcome)
+
+    assert decision.action == "halt"
+    assert decision.target_model == "gpt-4o"
+    assert decision.reason == "synthetic:non_local_reroute:no_local_model"
 
 
 def test_stage_none_falls_through_to_budget_pressure() -> None:
