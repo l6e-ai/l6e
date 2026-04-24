@@ -2,13 +2,20 @@
 
 Decision only: no LLM calls, no execution, no side effects.
 Returns a GateDecision(action, target_model, reason) for each pending call.
+
+The pure decision logic lives in ``l6e._gate_core`` so cloud
+(``hosted-edge``/``/v1/authorize``) can enforce identical semantics.
+This class layers local-router resolution on top: when the core asks
+for a reroute, we consult ``ILocalRouter.best_local_model()`` and
+halt cleanly when no local model is available.
 """
 from __future__ import annotations
 
 from decimal import Decimal
 
+from l6e._gate_core import GateCoreOutcome, decide
 from l6e._protocols import ILocalRouter, IRunStore
-from l6e._types import BudgetMode, GateDecision, PipelinePolicy, PromptComplexity, StageRoutingHint
+from l6e._types import GateDecision, PipelinePolicy, PromptComplexity
 
 
 def _allow(model: str, reason: str = "allow") -> GateDecision:
@@ -26,7 +33,7 @@ def _reroute(target: str, reason: str) -> GateDecision:
 class ConstraintGate:
     """Reads PipelinePolicy + IRunStore state + ILocalRouter and returns a GateDecision.
 
-    Priority order:
+    Priority order (delegated to ``l6e._gate_core.decide``):
     1. stage_overrides  — explicit BudgetMode per stage, wins over everything
     2. over-budget      — estimated_cost would push spend past budget
     3. stage_routing    — tier hint per stage
@@ -55,66 +62,39 @@ class ConstraintGate:
         del user_id, tenant_id, cohort_hint
         policy = self._policy
 
-        # ------------------------------------------------------------------
-        # 1. stage_overrides — explicit BudgetMode per stage
-        # ------------------------------------------------------------------
-        if stage is not None and stage in policy.stage_overrides:
-            override = policy.stage_overrides[stage]
-            if override == BudgetMode.HALT:
-                return _halt(model, "stage_override:halt")
-            if override == BudgetMode.REROUTE:
-                return self._do_reroute(model, "stage_override:reroute")
-            # WARN is informational only at v0.1 — fall through to allow
-            return _allow(model, "stage_override:warn")
+        outcome = decide(
+            budget=Decimal(str(policy.budget)),
+            spent=store.spent(),
+            estimated_cost=estimated_cost,
+            budget_mode=policy.budget_mode,
+            reroute_threshold=Decimal(str(policy.reroute_threshold)),
+            stage=stage,
+            complexity=complexity,
+            stage_overrides=policy.stage_overrides,
+            stage_routing=policy.stage_routing,
+        )
 
-        # ------------------------------------------------------------------
-        # 2. Over-budget guard — estimated call would exceed total budget
-        # ------------------------------------------------------------------
-        if store.spent() + estimated_cost > Decimal(str(policy.budget)):
-            return _halt(model, "budget_pressure:halt")
+        return self._materialize(model, outcome)
 
-        # ------------------------------------------------------------------
-        # 3. stage_routing — tier hint per stage
-        # ------------------------------------------------------------------
-        if stage is not None and stage in policy.stage_routing:
-            hint = policy.stage_routing[stage]
-            if hint == StageRoutingHint.LOCAL:
-                return self._do_reroute(model, "stage_routing:local")
-            if hint == StageRoutingHint.CLOUD_STANDARD:
-                return _allow(model, "stage_routing:cloud_standard")
-            if hint == StageRoutingHint.CLOUD_FRONTIER:
-                return _allow(model, "allow:frontier_protected")
-            # INHERIT → fall through to budget pressure
+    def _materialize(self, model: str, outcome: GateCoreOutcome) -> GateDecision:
+        """Resolve a pure outcome into a concrete ``GateDecision``.
 
-        # ------------------------------------------------------------------
-        # 4. Budget pressure — spent/budget >= reroute_threshold
-        # ------------------------------------------------------------------
-        if policy.budget > 0:
-            budget = Decimal(str(policy.budget))
-            spent_ratio = store.spent() / budget
-            reroute_threshold = Decimal(str(policy.reroute_threshold))
-
-            is_over_threshold = spent_ratio >= reroute_threshold
-        else:
-            is_over_threshold = False
-
-        if is_over_threshold:
-            mode = policy.budget_mode
-            if mode == BudgetMode.HALT:
-                return _halt(model, "budget_pressure:halt")
-            if mode == BudgetMode.REROUTE:
-                return self._do_reroute(model, "budget_pressure:reroute")
-            # WARN
-            return _allow(model, "warn:budget_pressure")
-
-        # ------------------------------------------------------------------
-        # 5. Default: allow
-        # ------------------------------------------------------------------
-        return _allow(model)
-
-    def _do_reroute(self, requested_model: str, reason: str) -> GateDecision:
-        """Attempt reroute to local; fall back to halt if no local model."""
-        local = self._router.best_local_model()
-        if local is None:
-            return _halt(requested_model, reason + ":no_local_model")
-        return _reroute(local, reason)
+        Every reroute in the OSS gate needs a local-model target.
+        ``wants_local_reroute`` captures the cases (stage override
+        REROUTE, stage_routing LOCAL, budget-pressure REROUTE). When
+        the router has nothing to offer we halt cleanly with a stable
+        ``:no_local_model`` suffix — the integration tests match on it.
+        """
+        if outcome.action == "allow":
+            return _allow(model, outcome.reason)
+        if outcome.action == "halt":
+            return _halt(model, outcome.reason)
+        if outcome.wants_local_reroute:
+            local = self._router.best_local_model()
+            if local is None:
+                return _halt(model, outcome.reason + ":no_local_model")
+            return _reroute(local, outcome.reason)
+        # Defensive: a reroute that doesn't want local resolution has
+        # no meaningful target in the OSS gate. Halt rather than pick
+        # an arbitrary model.
+        return _halt(model, outcome.reason + ":no_local_model")
