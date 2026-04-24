@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Added
+
+- **Family-version pricing fallback in `LiteLLMCostEstimator`** (L6E-45). When a model is not present in the vendored LiteLLM pricing table (e.g. a brand-new `claude-opus-5.x` release), the estimator now falls back to the newest known member of the same family, returns `pricing_confidence="low"` / `pricing_source="family_version_fallback"`, and surfaces a structured warning. This stops silent blanket-rate estimation while keeping the gate fail-open. Sessions priced via family-fallback are flagged `pricing_known=False` and are excluded from calibration and Layer 2 training by policy.
+
 ## [0.3.1] - 2026-04-23
 ### Added
 - **Iron-rule fail-open guard on every public `PipelineContext` entry point** (L6E-41). `advise`, `call`, `record`, `budget_status`, `run_summary`, and `__exit__` now catch any exception from broken collaborators (gate / classifier / estimator / store / log) and degrade to "allow" rather than raising into customer code. `ctx.call` always passes through to the provided `fn` on non-halt decisions, even when the entire gate is broken. Fail-open decisions carry `reason="fail_open:gate_exception"` for telemetry. See `docs/runbooks/fails-open-matrix.md`.
