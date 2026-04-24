@@ -19,6 +19,9 @@ _logger = logging.getLogger(__name__)
 # never appear in a caller-supplied model ID like "claude-4.6-sonnet-large".
 _DATE_OR_LATEST_RE = re.compile(r"^\d{5,}$|^latest$")
 
+# Recognise a numeric version token like ``4`` or ``4.6``/``4-6`` inside a key.
+_VERSION_TOKEN_RE = re.compile(r"^\d+$")
+
 # Cache of (normalized-key-tokens, original-key) pairs built once.
 _LITELLM_BARE_KEYS: list[tuple[frozenset[str], str]] | None = None
 
@@ -43,6 +46,56 @@ def _build_bare_key_cache() -> list[tuple[frozenset[str], str]]:
         if tokens:
             result.append((tokens, key))
     return result
+
+
+def _extract_version(tokens: frozenset[str]) -> tuple[int, int]:
+    """Extract a ``(major, minor)`` version from a token set.
+
+    Tokens like ``4``, ``6`` or ``5``, ``3`` are interpreted as
+    ``major.minor`` in the order they would appear in the original key.
+    Missing minor defaults to 0 so single-version families still sort.
+    Returns ``(0, 0)`` when no version tokens are present.
+    """
+    versions = sorted(int(t) for t in tokens if _VERSION_TOKEN_RE.match(t))
+    if not versions:
+        return (0, 0)
+    if len(versions) == 1:
+        return (versions[0], 0)
+    return (versions[0], versions[1])
+
+
+def _resolve_family_fallback(
+    input_tokens: frozenset[str],
+    bare_keys: list[tuple[frozenset[str], str]],
+) -> str | None:
+    """Find the newest same-family key when an exact-version lookup fails.
+
+    "Same-family" means every non-version token of the candidate appears in
+    the input (so ``claude-opus-4-6`` matches input ``claude-opus-4.7``
+    because ``{claude, opus}`` ⊆ ``{claude, opus, 4, 7}``). Among those
+    candidates we pick the one with the highest ``(major, minor)`` version
+    tokens — i.e. the newest known release of that family. This lets us
+    price a brand-new release by the most recent predecessor rather than
+    punting to the blanket ``$0.01/1k`` fallback, while pricing-source
+    remains distinct so downstream audits can exclude these estimates from
+    calibration and Layer 2 training.
+    """
+    best_version: tuple[int, int] = (-1, -1)
+    best_key: str | None = None
+    input_non_version = frozenset(
+        t for t in input_tokens if not _VERSION_TOKEN_RE.match(t)
+    )
+    for key_tokens, orig_key in bare_keys:
+        key_non_version = frozenset(
+            t for t in key_tokens if not _VERSION_TOKEN_RE.match(t)
+        )
+        if not key_non_version or not key_non_version.issubset(input_non_version):
+            continue
+        version = _extract_version(key_tokens)
+        if version > best_version:
+            best_version = version
+            best_key = orig_key
+    return best_key
 
 
 def resolve_model_id(model_id: str) -> str | None:
@@ -163,6 +216,48 @@ class LiteLLMCostEstimator:
                     warning=None,
                     model_pricing_known=True,
                     resolved_model=resolved,
+                )
+            except Exception:
+                pass
+
+        # Last-resort before the blanket fallback: price by the newest
+        # known model of the same family. ``claude-opus-4.7`` → the
+        # newest ``claude-opus-*`` we do know about. Estimates are
+        # marked low-confidence with a distinct pricing_source so the
+        # data-quality audit can exclude these sessions from calibration
+        # and Layer 2 training until the real pricing lands.
+        #
+        # ``resolve_model_id`` above always initialises ``_LITELLM_BARE_KEYS``
+        # before we reach this point, so the cache is guaranteed populated.
+        assert _LITELLM_BARE_KEYS is not None
+        family_resolved = _resolve_family_fallback(
+            frozenset(
+                t for t in re.split(r"[-./: ]", model.lower()) if t
+            ),
+            _LITELLM_BARE_KEYS,
+        )
+        if family_resolved is not None:
+            try:
+                prompt_cost, completion_cost = litellm.cost_per_token(
+                    model=family_resolved,
+                    prompt_tokens=prompt_tokens,
+                    completion_tokens=completion_tokens,
+                )
+                family_warning = (
+                    f"l6e: unknown model '{model}' — priced from nearest known "
+                    f"family member '{family_resolved}'. Estimate flagged "
+                    "low-confidence; session is excluded from calibration and "
+                    "Layer 2 training (see data-quality audit)."
+                )
+                if emit_warning:
+                    warnings.warn(family_warning, stacklevel=2)
+                return CostEstimateMetadata(
+                    cost_usd=Decimal(str(prompt_cost + completion_cost)),
+                    pricing_confidence="low",
+                    pricing_source="family_version_fallback",
+                    warning=family_warning,
+                    model_pricing_known=False,
+                    resolved_model=family_resolved,
                 )
             except Exception:
                 pass

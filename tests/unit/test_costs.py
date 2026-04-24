@@ -141,6 +141,118 @@ def test_estimate_with_metadata_unknown_model_marks_low_confidence() -> None:
     assert meta.resolved_model is None
 
 
+def test_family_version_fallback_prices_future_claude_release() -> None:
+    """A brand-new Claude release prices from the newest known family member.
+
+    This is the "real issue surfaced and fixed" from L6E-45: the blanket
+    $0.01/1k fallback under-prices frontier models by 5-20x. Family-version
+    fallback uses actual Anthropic rates for the newest known Opus/Sonnet/
+    Haiku we've seen, while ``pricing_source='family_version_fallback'``
+    remains distinct so the data-quality audit excludes these sessions from
+    calibration and Layer 2 training.
+    """
+    from l6e.costs import LiteLLMCostEstimator, _build_bare_key_cache
+
+    # Pick a version far enough in the future that the subset matcher can't
+    # resolve it. Tokens must not be a superset of any exact litellm key.
+    future_model = "claude-opus-9.99"
+    exact_tokens = {"claude", "opus", "9", "99"}
+    bare_keys = _build_bare_key_cache()
+    for key_tokens, _key in bare_keys:
+        assert not key_tokens.issubset(exact_tokens), (
+            f"precondition: no known key should be a subset of {future_model}"
+        )
+
+    estimator = LiteLLMCostEstimator(fallback_cost_per_1k_tokens=0.01)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        meta = estimator.estimate_with_metadata(
+            model=future_model,
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+    assert meta.model_pricing_known is False
+    assert meta.pricing_confidence == "low"
+    assert meta.pricing_source == "family_version_fallback"
+    assert meta.resolved_model is not None
+    assert meta.resolved_model.startswith("claude-opus-")
+    assert meta.cost_usd > Decimal("0.02"), (
+        "family fallback should exceed the $0.01/1k blanket rate for Opus"
+    )
+    assert meta.warning is not None and "low-confidence" in meta.warning
+
+
+def test_family_version_fallback_prefers_newest_known_version() -> None:
+    """Fallback picks the highest-version known family member, not any member."""
+    from l6e.costs import _build_bare_key_cache, _resolve_family_fallback
+
+    bare_keys = _build_bare_key_cache()
+    import re as _re
+    tokens = frozenset(
+        t for t in _re.split(r"[-./: ]", "claude-opus-9.99") if t
+    )
+    resolved = _resolve_family_fallback(tokens, bare_keys)
+    assert resolved is not None
+    assert resolved.startswith("claude-opus-")
+    # Must be the newest opus key among candidates whose non-version tokens
+    # are a subset of the input's non-version tokens — mirroring the
+    # resolver's own eligibility filter.
+    input_non_version = frozenset({"claude", "opus"})
+    max_version = (-1, -1)
+    max_key = None
+    for key_tokens, key in bare_keys:
+        key_non_version = frozenset(
+            t for t in key_tokens if not t.isdigit()
+        )
+        if not key_non_version or not key_non_version.issubset(input_non_version):
+            continue
+        nums = sorted(int(t) for t in key_tokens if t.isdigit())
+        ver = (nums[0], nums[1]) if len(nums) >= 2 else (nums[0], 0) if nums else (0, 0)
+        if ver > max_version:
+            max_version = ver
+            max_key = key
+    assert resolved == max_key, f"expected newest opus {max_key}, got {resolved}"
+
+
+def test_family_version_fallback_not_triggered_for_unrelated_model() -> None:
+    """Inputs with no non-version token in common with any key still fall through."""
+    from l6e.costs import LiteLLMCostEstimator
+
+    estimator = LiteLLMCostEstimator(fallback_cost_per_1k_tokens=0.01)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        meta = estimator.estimate_with_metadata(
+            model="totally-unknown-model-xyz-999",
+            prompt_tokens=100,
+            completion_tokens=50,
+        )
+    assert meta.pricing_source == "fallback_rate"
+
+
+def test_family_version_fallback_rebuilds_cache_when_invalidated() -> None:
+    """After cache invalidation, the next estimate repopulates transparently.
+
+    The bare-key cache is module-global; the refresh hook sets it to
+    ``None`` after a snapshot refresh. ``resolve_model_id`` rebuilds it
+    lazily on the next call, which is the single init path
+    ``estimate_with_metadata`` depends on.
+    """
+    from l6e import costs as costs_mod
+
+    costs_mod._LITELLM_BARE_KEYS = None
+
+    estimator = costs_mod.LiteLLMCostEstimator(fallback_cost_per_1k_tokens=0.01)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        meta = estimator.estimate_with_metadata(
+            model="claude-opus-9.99",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+    assert meta.pricing_source == "family_version_fallback"
+    assert costs_mod._LITELLM_BARE_KEYS is not None
+
+
 # ---------------------------------------------------------------------------
 # resolve_model_id — unit tests
 # ---------------------------------------------------------------------------
