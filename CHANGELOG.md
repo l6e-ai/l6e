@@ -7,6 +7,12 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [Unreleased]
+
+### Changed
+
+- **Gate decision logic extracted to `l6e._gate_core`** (L6E-40). `ConstraintGate.check()` now delegates the full priority ladder (`stage_overrides` → over-budget guard → `stage_routing` → budget pressure → allow) to a pure `decide()` function shared with the hosted-edge cloud gate. Public `ConstraintGate` behavior is unchanged — existing deployments see identical decisions and reasons. The extraction enables the cloud `/v1/authorize` endpoint to enforce byte-for-byte identical semantics, verified by a 27-case golden parity matrix (`shared_fixtures/gate_parity_matrix.json`) exercised from both sides in CI.
+
 ## [0.3.2] - 2026-04-23
 
 ### Added
