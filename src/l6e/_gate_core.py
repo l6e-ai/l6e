@@ -7,8 +7,8 @@ This module is imported by:
 - ``hosted-edge`` ``/v1/authorize`` (cloud): mirrors this logic on the
   server side so SDK callers and MCP clients get identical decisions.
   The cloud copy lives in ``hosted-edge/src/enforcement/gate_core.py`` and
-  is kept honest by the golden parity matrix in
-  ``shared_fixtures/gate_parity_matrix.json`` (see L6E-40).
+  is kept honest by the golden parity matrix at
+  ``l6e/tests/fixtures/gate_parity_matrix.json`` (see L6E-40).
 
 Keep this module pure:
 

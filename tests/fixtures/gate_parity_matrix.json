@@ -1,0 +1,242 @@
+{
+  "$schema_notes": [
+    "Golden parity matrix for L6E-40. Canonical path: l6e/tests/fixtures/gate_parity_matrix.json",
+    "  - l6e/tests/unit/test_gate_parity.py (runs l6e.gate.ConstraintGate)",
+    "  - hosted-edge/tests/test_gate_parity.py (runs /v1/authorize; reads this file from sibling l6e/ in monorepo)",
+    "When you add a case, BOTH tests must pass. When you change the gate",
+    "decision ladder, regenerate and keep both sides in sync.",
+    "",
+    "Input semantics:",
+    "  budget/spent/estimated_cost: decimal strings, USD",
+    "  budget_mode: 'halt' | 'reroute' | 'warn'",
+    "  reroute_threshold: number in [0, 1]",
+    "  stage: optional string",
+    "  complexity: optional 'low'|'medium'|'high' (reserved, not consulted)",
+    "  stage_overrides: {stage: budget_mode}",
+    "  stage_routing: {stage: 'local'|'cloud_standard'|'cloud_frontier'|'inherit'}",
+    "",
+    "Output semantics:",
+    "  expected_action: 'allow' | 'reroute' | 'halt'",
+    "  expected_reason: exact match against gate reason string",
+    "  expected_tier: 'local'|'cloud_standard'|'cloud_frontier'|null (stage-routing tier hint)"
+  ],
+  "cases": [
+    {
+      "name": "healthy_budget_no_stage_allows",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "over_budget_guard_halts_regardless_of_mode",
+      "budget": "1.00", "spent": "0.90", "estimated_cost": "0.20",
+      "budget_mode": "reroute", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "halt", "expected_reason": "budget_pressure:halt", "expected_tier": null
+    },
+    {
+      "name": "pressure_with_halt_mode_halts",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "halt", "expected_reason": "budget_pressure:halt", "expected_tier": null
+    },
+    {
+      "name": "pressure_with_reroute_mode_reroutes",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "reroute", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "reroute", "expected_reason": "budget_pressure:reroute", "expected_tier": null
+    },
+    {
+      "name": "pressure_with_warn_mode_allows",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "warn", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "warn:budget_pressure", "expected_tier": null
+    },
+    {
+      "name": "exact_threshold_boundary_triggers",
+      "budget": "1.00", "spent": "0.80", "estimated_cost": "0.001",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "halt", "expected_reason": "budget_pressure:halt", "expected_tier": null
+    },
+    {
+      "name": "just_below_threshold_allows",
+      "budget": "1.00", "spent": "0.799", "estimated_cost": "0.001",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "stage_override_halt_when_healthy",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "final_reasoning", "complexity": null,
+      "stage_overrides": {"final_reasoning": "halt"}, "stage_routing": {},
+      "expected_action": "halt", "expected_reason": "stage_override:halt", "expected_tier": null
+    },
+    {
+      "name": "stage_override_halt_beats_global_reroute_mode",
+      "budget": "1.00", "spent": "0.95", "estimated_cost": "0.001",
+      "budget_mode": "reroute", "reroute_threshold": 0.8,
+      "stage": "final_reasoning", "complexity": null,
+      "stage_overrides": {"final_reasoning": "halt"}, "stage_routing": {},
+      "expected_action": "halt", "expected_reason": "stage_override:halt", "expected_tier": null
+    },
+    {
+      "name": "stage_override_reroute_when_healthy",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {"summarization": "reroute"}, "stage_routing": {},
+      "expected_action": "reroute", "expected_reason": "stage_override:reroute", "expected_tier": null
+    },
+    {
+      "name": "stage_override_warn_allows",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {"summarization": "warn"}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "stage_override:warn", "expected_tier": null
+    },
+    {
+      "name": "stage_routing_local_healthy_reroutes",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"summarization": "local"},
+      "expected_action": "reroute", "expected_reason": "stage_routing:local", "expected_tier": "local"
+    },
+    {
+      "name": "stage_routing_cloud_standard_allows_with_tier",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "drafting", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"drafting": "cloud_standard"},
+      "expected_action": "allow", "expected_reason": "stage_routing:cloud_standard", "expected_tier": "cloud_standard"
+    },
+    {
+      "name": "stage_routing_cloud_frontier_allows_with_tier",
+      "budget": "1.00", "spent": "0.20", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "reasoning", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"reasoning": "cloud_frontier"},
+      "expected_action": "allow", "expected_reason": "allow:frontier_protected", "expected_tier": "cloud_frontier"
+    },
+    {
+      "name": "stage_routing_cloud_frontier_halts_when_call_exceeds_budget",
+      "budget": "1.00", "spent": "0.90", "estimated_cost": "0.20",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "reasoning", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"reasoning": "cloud_frontier"},
+      "expected_action": "halt", "expected_reason": "budget_pressure:halt", "expected_tier": null
+    },
+    {
+      "name": "stage_routing_local_halts_when_call_exceeds_budget",
+      "budget": "1.00", "spent": "0.90", "estimated_cost": "0.20",
+      "budget_mode": "reroute", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"summarization": "local"},
+      "expected_action": "halt", "expected_reason": "budget_pressure:halt", "expected_tier": null
+    },
+    {
+      "name": "stage_routing_inherit_falls_through_to_pressure_halt",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"summarization": "inherit"},
+      "expected_action": "halt", "expected_reason": "budget_pressure:halt", "expected_tier": null
+    },
+    {
+      "name": "stage_routing_inherit_allows_when_healthy",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {}, "stage_routing": {"summarization": "inherit"},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "stage_none_skips_stage_hints_hits_pressure",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "reroute", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {"summarization": "halt"},
+      "stage_routing": {"summarization": "local"},
+      "expected_action": "reroute", "expected_reason": "budget_pressure:reroute", "expected_tier": null
+    },
+    {
+      "name": "zero_budget_always_allows",
+      "budget": "0", "spent": "0", "estimated_cost": "0",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "zero_budget_stage_override_halt_still_fires",
+      "budget": "0", "spent": "0", "estimated_cost": "0",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "gated_stage", "complexity": null,
+      "stage_overrides": {"gated_stage": "halt"}, "stage_routing": {},
+      "expected_action": "halt", "expected_reason": "stage_override:halt", "expected_tier": null
+    },
+    {
+      "name": "unrelated_stage_overrides_ignored",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "planning", "complexity": null,
+      "stage_overrides": {"other_stage": "halt"}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "complexity_high_does_not_change_decision_healthy",
+      "budget": "1.00", "spent": "0.10", "estimated_cost": "0.01",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": null, "complexity": "high",
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "complexity_low_does_not_change_decision_pressure_reroute",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "reroute", "reroute_threshold": 0.8,
+      "stage": null, "complexity": "low",
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "reroute", "expected_reason": "budget_pressure:reroute", "expected_tier": null
+    },
+    {
+      "name": "custom_threshold_below_triggers_allow",
+      "budget": "1.00", "spent": "0.40", "estimated_cost": "0.001",
+      "budget_mode": "reroute", "reroute_threshold": 0.5,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "allow", "expected_reason": "allow", "expected_tier": null
+    },
+    {
+      "name": "custom_threshold_at_boundary_triggers_reroute",
+      "budget": "1.00", "spent": "0.50", "estimated_cost": "0.001",
+      "budget_mode": "reroute", "reroute_threshold": 0.5,
+      "stage": null, "complexity": null,
+      "stage_overrides": {}, "stage_routing": {},
+      "expected_action": "reroute", "expected_reason": "budget_pressure:reroute", "expected_tier": null
+    },
+    {
+      "name": "stage_override_reroute_beats_budget_pressure_halt",
+      "budget": "1.00", "spent": "0.85", "estimated_cost": "0.001",
+      "budget_mode": "halt", "reroute_threshold": 0.8,
+      "stage": "summarization", "complexity": null,
+      "stage_overrides": {"summarization": "reroute"}, "stage_routing": {},
+      "expected_action": "reroute", "expected_reason": "stage_override:reroute", "expected_tier": null
+    }
+  ]
+}

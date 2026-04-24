@@ -1,8 +1,10 @@
 """Parity test for ``ConstraintGate`` against the shared golden matrix (L6E-40).
 
 This matrix is the single source of truth for cloud/core parity. The
-same JSON is consumed by ``hosted-edge/tests/test_gate_parity.py``, which
-exercises ``POST /v1/authorize``. Both sides must agree on every case.
+JSON ships at ``tests/fixtures/gate_parity_matrix.json`` inside the ``l6e``
+package. ``hosted-edge/tests/test_gate_parity.py`` reads the same file from
+the sibling ``l6e`` tree in the monorepo and exercises ``POST /v1/authorize``.
+Both sides must agree on every case.
 
 If you add a case to the matrix, run both test suites before merging.
 If you change the gate decision ladder, regenerate the matrix (and
@@ -21,9 +23,8 @@ from l6e._types import BudgetMode, PipelinePolicy, PromptComplexity, StageRoutin
 from l6e.gate import ConstraintGate
 from tests.conftest import FakeRouter, FakeStore
 
-# Repo layout: l6e/tests/unit/<this file>  →  l6e/tests/unit → l6e/tests → l6e → <repo>
-_REPO_ROOT = Path(__file__).resolve().parents[3]
-_MATRIX_PATH = _REPO_ROOT / "shared_fixtures" / "gate_parity_matrix.json"
+# Fixture ships with the l6e package (standalone sub-repo friendly).
+_MATRIX_PATH = Path(__file__).resolve().parent.parent / "fixtures" / "gate_parity_matrix.json"
 
 
 def _load_matrix() -> list[dict]:
