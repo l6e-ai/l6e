@@ -229,6 +229,30 @@ def test_family_version_fallback_not_triggered_for_unrelated_model() -> None:
     assert meta.pricing_source == "fallback_rate"
 
 
+def test_family_version_fallback_rebuilds_cache_when_invalidated() -> None:
+    """After cache invalidation, the next estimate repopulates transparently.
+
+    The bare-key cache is module-global; the refresh hook sets it to
+    ``None`` after a snapshot refresh. ``resolve_model_id`` rebuilds it
+    lazily on the next call, which is the single init path
+    ``estimate_with_metadata`` depends on.
+    """
+    from l6e import costs as costs_mod
+
+    costs_mod._LITELLM_BARE_KEYS = None
+
+    estimator = costs_mod.LiteLLMCostEstimator(fallback_cost_per_1k_tokens=0.01)
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        meta = estimator.estimate_with_metadata(
+            model="claude-opus-9.99",
+            prompt_tokens=1000,
+            completion_tokens=1000,
+        )
+    assert meta.pricing_source == "family_version_fallback"
+    assert costs_mod._LITELLM_BARE_KEYS is not None
+
+
 # ---------------------------------------------------------------------------
 # resolve_model_id — unit tests
 # ---------------------------------------------------------------------------

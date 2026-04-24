@@ -226,9 +226,10 @@ class LiteLLMCostEstimator:
         # marked low-confidence with a distinct pricing_source so the
         # data-quality audit can exclude these sessions from calibration
         # and Layer 2 training until the real pricing lands.
-        global _LITELLM_BARE_KEYS  # noqa: PLW0603
-        if _LITELLM_BARE_KEYS is None:
-            _LITELLM_BARE_KEYS = _build_bare_key_cache()
+        #
+        # ``resolve_model_id`` above always initialises ``_LITELLM_BARE_KEYS``
+        # before we reach this point, so the cache is guaranteed populated.
+        assert _LITELLM_BARE_KEYS is not None
         family_resolved = _resolve_family_fallback(
             frozenset(
                 t for t in re.split(r"[-./: ]", model.lower()) if t
