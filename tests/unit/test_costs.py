@@ -476,3 +476,84 @@ def test_refresh_swallows_fetch_exception() -> None:
             if t.name == "l6e-cost-map-refresh":
                 t.join(timeout=5)
     # No exception raised — test passes if we get here.
+
+
+def test_merge_registers_provider_grouped_set() -> None:
+    """Merging a fetched map adds entries to ``litellm.<provider>_models`` sets.
+
+    Regression for L6E-86 (2026-04-25 diagnostic): when ``litellm`` is imported
+    with ``LITELLM_LOCAL_MODEL_COST_MAP=True`` (as ``l6e_mcp/__init__.py``
+    does), provider-grouped sets like ``litellm.anthropic_models`` are frozen
+    at the bundled snapshot's contents. Updating ``litellm.model_cost`` later
+    is not enough — ``cost_per_token`` calls ``get_llm_provider`` which reads
+    those sets, and a model in ``model_cost`` but missing from its provider
+    set raises ``BadRequestError: LLM Provider NOT provided``. The merge
+    helper must call ``litellm.add_known_models`` to keep both in sync.
+    """
+    import litellm
+
+    import l6e.costs as costs_mod
+
+    fake_model = "fake-anthropic-future-model-xyz"
+    fake_entry = {
+        "input_cost_per_token": 0.000005,
+        "output_cost_per_token": 0.000025,
+        "litellm_provider": "anthropic",
+        "max_tokens": 1000,
+        "max_input_tokens": 1000,
+        "max_output_tokens": 1000,
+        "mode": "chat",
+    }
+    assert fake_model not in litellm.anthropic_models
+    assert fake_model not in litellm.model_cost
+
+    try:
+        costs_mod._merge_fetched_cost_map({fake_model: fake_entry})
+
+        assert fake_model in litellm.model_cost
+        assert fake_model in litellm.anthropic_models, (
+            "merge must register the model in its provider-grouped set so "
+            "litellm.cost_per_token can infer the provider — see L6E-86"
+        )
+        assert costs_mod._LITELLM_BARE_KEYS is None
+
+        # The full symptom: cost_per_token must succeed with no provider prefix.
+        prompt_cost, completion_cost = litellm.cost_per_token(
+            model=fake_model,
+            prompt_tokens=1000,
+            completion_tokens=500,
+        )
+        assert prompt_cost > 0 and completion_cost > 0
+    finally:
+        litellm.model_cost.pop(fake_model, None)
+        litellm.anthropic_models.discard(fake_model)
+
+
+def test_merge_swallows_add_known_models_exception() -> None:
+    """If ``litellm.add_known_models`` raises (e.g. future API drift), the merge
+    still updates ``model_cost`` and invalidates the bare-key cache rather than
+    leaving litellm half-merged.
+    """
+    import litellm
+
+    import l6e.costs as costs_mod
+
+    fake_model = "fake-merge-half-failure-model-xyz"
+    fake_entry = {
+        "input_cost_per_token": 0.000001,
+        "litellm_provider": "anthropic",
+    }
+
+    costs_mod._LITELLM_BARE_KEYS = [(frozenset({"sentinel"}), "sentinel")]
+    try:
+        with patch(
+            "l6e.costs.litellm.add_known_models",
+            side_effect=RuntimeError("simulated upstream API drift"),
+        ):
+            costs_mod._merge_fetched_cost_map({fake_model: fake_entry})
+
+        assert fake_model in litellm.model_cost
+        assert costs_mod._LITELLM_BARE_KEYS is None
+    finally:
+        litellm.model_cost.pop(fake_model, None)
+        litellm.anthropic_models.discard(fake_model)
