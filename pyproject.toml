@@ -7,7 +7,7 @@ license = "MIT"
 license-files = ["LICEN[CS]E*"]
 authors = [{ name = "L6E AI, LLC", email = "hello@l6e.ai" }]
 classifiers = [
-    "Development Status :: 3 - Alpha",
+    "Development Status :: 4 - Alpha",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",

@@ -299,6 +299,35 @@ class LiteLLMCostEstimator:
 _refresh_started = False
 
 
+def _merge_fetched_cost_map(fetched: dict) -> None:
+    """Merge a freshly-fetched cost map into litellm's globals.
+
+    Three updates happen together; missing any one of them leaves litellm
+    in an inconsistent state where a model has a price entry but
+    ``cost_per_token`` still raises:
+
+    1. ``litellm.model_cost`` — the price dict consulted by ``cost_per_token``.
+    2. ``litellm.<provider>_models`` (e.g. ``anthropic_models``) — provider-
+       grouped sets that ``get_llm_provider`` consults to infer a provider
+       when the caller passes a bare model id like ``claude-opus-4-7`` (no
+       ``anthropic/`` prefix). litellm only populates these sets at import
+       time via ``add_known_models``; updating ``model_cost`` post-import
+       does not flow through to them. The symptom of forgetting this step
+       is ``BadRequestError: LLM Provider NOT provided`` for a model that
+       is in ``model_cost`` — see the L6E-86 diagnostic on 2026-04-25.
+    3. ``_LITELLM_BARE_KEYS`` — our own fuzzy-resolver cache; invalidated
+       so the next ``resolve_model_id`` call rebuilds it from the merged
+       ``litellm.model_cost``.
+    """
+    global _LITELLM_BARE_KEYS  # noqa: PLW0603
+    litellm.model_cost.update(fetched)
+    try:
+        litellm.add_known_models(fetched)
+    except Exception:
+        _logger.debug("l6e: add_known_models failed post-refresh", exc_info=True)
+    _LITELLM_BARE_KEYS = None
+
+
 def refresh_model_cost_map_async() -> None:
     """Fetch the remote model cost map in a background thread and merge it
     into ``litellm.model_cost``.
@@ -306,20 +335,18 @@ def refresh_model_cost_map_async() -> None:
     Safe to call multiple times — only the first invocation spawns a thread.
     On any failure the local (bundled) map remains in effect.
     """
-    global _refresh_started, _LITELLM_BARE_KEYS  # noqa: PLW0603
+    global _refresh_started  # noqa: PLW0603
     if _refresh_started:
         return
     _refresh_started = True
 
     def _fetch() -> None:
-        global _LITELLM_BARE_KEYS  # noqa: PLW0603
         try:
             url = litellm.model_cost_map_url
             fetched = GetModelCostMap.fetch_remote_model_cost_map(url, timeout=10)
             backup_count = GetModelCostMap._get_backup_model_count()
             if GetModelCostMap.validate_model_cost_map(fetched, backup_count):
-                litellm.model_cost.update(fetched)
-                _LITELLM_BARE_KEYS = None  # invalidate fuzzy-resolver cache
+                _merge_fetched_cost_map(fetched)
                 _logger.debug("l6e: refreshed litellm model cost map from %s", url)
             else:
                 _logger.debug("l6e: remote model cost map failed validation, keeping local")
