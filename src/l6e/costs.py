@@ -7,7 +7,7 @@ import threading
 import warnings
 from dataclasses import dataclass
 from decimal import Decimal
-from typing import Literal
+from typing import Any, Literal
 
 import litellm
 from litellm.litellm_core_utils.get_model_cost_map import GetModelCostMap
@@ -299,7 +299,7 @@ class LiteLLMCostEstimator:
 _refresh_started = False
 
 
-def _merge_fetched_cost_map(fetched: dict) -> None:
+def _merge_fetched_cost_map(fetched: dict[str, Any]) -> None:
     """Merge a freshly-fetched cost map into litellm's globals.
 
     Three updates happen together; missing any one of them leaves litellm
