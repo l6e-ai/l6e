@@ -137,3 +137,45 @@ def test_family_fallback_returns_none_when_only_self_is_available(
 
     assert meta.pricing_source == "fallback_rate"
     assert meta.resolved_model is None
+
+
+def test_family_fallback_returns_none_when_input_is_below_known_family() -> None:
+    bare_keys = [
+        (frozenset({"l6e", "bounded", "family", "4", "5"}), "l6e-bounded-family-4-5"),
+        (frozenset({"l6e", "bounded", "family", "4", "7"}), "l6e-bounded-family-4-7"),
+    ]
+
+    resolved = costs_mod._resolve_family_fallback(
+        frozenset({"l6e", "bounded", "family", "4", "2"}),
+        bare_keys,
+    )
+
+    assert resolved is None
+
+
+def test_family_fallback_chooses_newest_known_version_below_input() -> None:
+    bare_keys = [
+        (frozenset({"l6e", "bounded", "family", "4", "1"}), "l6e-bounded-family-4-1"),
+        (frozenset({"l6e", "bounded", "family", "4", "7"}), "l6e-bounded-family-4-7"),
+    ]
+
+    resolved = costs_mod._resolve_family_fallback(
+        frozenset({"l6e", "bounded", "family", "4", "5"}),
+        bare_keys,
+    )
+
+    assert resolved == "l6e-bounded-family-4-1"
+
+
+def test_family_fallback_chooses_table_max_when_input_is_above_known_family() -> None:
+    bare_keys = [
+        (frozenset({"l6e", "bounded", "family", "4", "5"}), "l6e-bounded-family-4-5"),
+        (frozenset({"l6e", "bounded", "family", "4", "7"}), "l6e-bounded-family-4-7"),
+    ]
+
+    resolved = costs_mod._resolve_family_fallback(
+        frozenset({"l6e", "bounded", "family", "4", "9"}),
+        bare_keys,
+    )
+
+    assert resolved == "l6e-bounded-family-4-7"
