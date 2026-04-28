@@ -134,7 +134,8 @@ def resolve_model_id(model_id: str) -> str | None:
         key_version_tokens = frozenset(
             t for t in key_tokens if _VERSION_TOKEN_RE.match(t)
         )
-        if key_version_tokens and input_version_tokens and key_version_tokens != input_version_tokens:
+        if key_version_tokens and input_version_tokens and \
+            key_version_tokens != input_version_tokens:
             continue
         score = len(key_tokens)
         if score > best_score or (score == best_score and len(key_tokens) < best_n_tokens):
