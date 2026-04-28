@@ -2,26 +2,26 @@
 
 [Full report](https://htmlpreview.github.io/?https://github.com/l6e-ai/l6e/blob/python-coverage-comment-action-data/htmlcov/index.html)
 
-| Name                             |    Stmts |     Miss |    Cover |   Missing |
-|--------------------------------- | -------: | -------: | -------: | --------: |
-| src/l6e/\_\_init\_\_.py          |        6 |        0 |     100% |           |
-| src/l6e/\_classify.py            |       43 |        0 |     100% |           |
-| src/l6e/\_gate\_core.py          |       45 |        0 |     100% |           |
-| src/l6e/\_log.py                 |       50 |        0 |     100% |           |
-| src/l6e/\_protocols.py           |       20 |        0 |     100% |           |
-| src/l6e/\_response.py            |       48 |        0 |     100% |           |
-| src/l6e/\_types.py               |      136 |        0 |     100% |           |
-| src/l6e/adapters/\_\_init\_\_.py |        0 |        0 |     100% |           |
-| src/l6e/adapters/crewai.py       |       12 |        0 |     100% |           |
-| src/l6e/adapters/langchain.py    |       58 |        0 |     100% |           |
-| src/l6e/adapters/universal.py    |        3 |        0 |     100% |           |
-| src/l6e/costs.py                 |      127 |        0 |     100% |           |
-| src/l6e/exceptions.py            |       13 |        0 |     100% |           |
-| src/l6e/gate.py                  |       31 |        0 |     100% |           |
-| src/l6e/pipeline.py              |      167 |        0 |     100% |           |
-| src/l6e/router.py                |       30 |        0 |     100% |           |
-| src/l6e/store.py                 |       41 |        0 |     100% |           |
-| **TOTAL**                        |  **830** |    **0** | **100%** |           |
+| Name                             |    Stmts |     Miss |   Cover |   Missing |
+|--------------------------------- | -------: | -------: | ------: | --------: |
+| src/l6e/\_\_init\_\_.py          |        6 |        0 |    100% |           |
+| src/l6e/\_classify.py            |       43 |        0 |    100% |           |
+| src/l6e/\_gate\_core.py          |       45 |        0 |    100% |           |
+| src/l6e/\_log.py                 |       50 |        0 |    100% |           |
+| src/l6e/\_protocols.py           |       20 |        0 |    100% |           |
+| src/l6e/\_response.py            |       48 |        0 |    100% |           |
+| src/l6e/\_types.py               |      136 |        0 |    100% |           |
+| src/l6e/adapters/\_\_init\_\_.py |        0 |        0 |    100% |           |
+| src/l6e/adapters/crewai.py       |       12 |        0 |    100% |           |
+| src/l6e/adapters/langchain.py    |       58 |        0 |    100% |           |
+| src/l6e/adapters/universal.py    |        3 |        0 |    100% |           |
+| src/l6e/costs.py                 |      134 |        2 |     99% |   273-274 |
+| src/l6e/exceptions.py            |       13 |        0 |    100% |           |
+| src/l6e/gate.py                  |       31 |        0 |    100% |           |
+| src/l6e/pipeline.py              |      167 |        0 |    100% |           |
+| src/l6e/router.py                |       30 |        0 |    100% |           |
+| src/l6e/store.py                 |       41 |        0 |    100% |           |
+| **TOTAL**                        |  **837** |    **2** | **99%** |           |
 
 
 ## Setup coverage badge
