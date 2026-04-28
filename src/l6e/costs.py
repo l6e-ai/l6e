@@ -68,20 +68,20 @@ def _resolve_family_fallback(
     input_tokens: frozenset[str],
     bare_keys: list[tuple[frozenset[str], str]],
 ) -> str | None:
-    """Find the newest same-family key when an exact-version lookup fails.
+    """Find the newest strictly older same-family key after lookup failure.
 
     "Same-family" means every non-version token of the candidate appears in
     the input (so ``claude-opus-4-6`` matches input ``claude-opus-4.7``
     because ``{claude, opus}`` ⊆ ``{claude, opus, 4, 7}``). Among those
-    candidates we pick the one with the highest ``(major, minor)`` version
-    tokens — i.e. the newest known release of that family. This lets us
-    price a brand-new release by the most recent predecessor rather than
-    punting to the blanket ``$0.01/1k`` fallback, while pricing-source
-    remains distinct so downstream audits can exclude these estimates from
-    calibration and Layer 2 training.
+    candidates we pick the highest ``(major, minor)`` version that is still
+    strictly lower than the caller's input version. This avoids returning the
+    input model itself when LiteLLM has a price row but provider registration
+    is broken, while still pricing a brand-new release by the most recent
+    predecessor rather than punting to the blanket ``$0.01/1k`` fallback.
     """
     best_version: tuple[int, int] = (-1, -1)
     best_key: str | None = None
+    input_version = _extract_version(input_tokens)
     input_non_version = frozenset(
         t for t in input_tokens if not _VERSION_TOKEN_RE.match(t)
     )
@@ -92,6 +92,8 @@ def _resolve_family_fallback(
         if not key_non_version or not key_non_version.issubset(input_non_version):
             continue
         version = _extract_version(key_tokens)
+        if version >= input_version:
+            continue
         if version > best_version:
             best_version = version
             best_key = orig_key
@@ -118,6 +120,9 @@ def resolve_model_id(model_id: str) -> str | None:
     input_tokens = frozenset(
         t for t in re.split(r"[-./: ]", model_id.lower()) if t
     )
+    input_version_tokens = frozenset(
+        t for t in input_tokens if _VERSION_TOKEN_RE.match(t)
+    )
 
     best_score = -1
     best_n_tokens = 9999
@@ -125,6 +130,12 @@ def resolve_model_id(model_id: str) -> str | None:
 
     for key_tokens, orig_key in _LITELLM_BARE_KEYS:
         if not key_tokens.issubset(input_tokens):
+            continue
+        key_version_tokens = frozenset(
+            t for t in key_tokens if _VERSION_TOKEN_RE.match(t)
+        )
+        if key_version_tokens and input_version_tokens and \
+            key_version_tokens != input_version_tokens:
             continue
         score = len(key_tokens)
         if score > best_score or (score == best_score and len(key_tokens) < best_n_tokens):
