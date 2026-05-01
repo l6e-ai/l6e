@@ -3,11 +3,11 @@
 Decision only: no LLM calls, no execution, no side effects.
 Returns a GateDecision(action, target_model, reason) for each pending call.
 
-The pure decision logic lives in ``l6e._gate_core`` so cloud
-(``hosted-edge``/``/v1/authorize``) can enforce identical semantics.
-This class layers local-router resolution on top: when the core asks
-for a reroute, we consult ``ILocalRouter.best_local_model()`` and
-halt cleanly when no local model is available.
+The pure decision logic lives in ``l6e._gate_core`` so the cloud
+authorize endpoint can enforce identical semantics. This class layers
+local-router resolution on top: when the core asks for a reroute, we
+consult ``ILocalRouter.best_local_model()`` and halt cleanly when no
+local model is available.
 
 ``RemoteConstraintGate`` (sibling, opt-in) extends the local gate with a
 synchronous ``POST /v1/authorize`` call that activates the SDK

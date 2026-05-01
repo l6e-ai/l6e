@@ -8,8 +8,7 @@ Iron rule: **the gate fails open, always.** Every public entry point
 wraps its internals so an unexpected exception in l6e collaborators never
 propagates into customer code. A crashed gate degrades to an "allow" pass
 through to the customer's original model request. See
-``pivot-docs/cost-benchmark-margin-thesis/05-integration-architecture.md``
-and ``docs/runbooks/fails-open-matrix.md``.
+``docs/runbooks/fails-open-matrix.md`` for the full failure-mode matrix.
 """
 from __future__ import annotations
 
