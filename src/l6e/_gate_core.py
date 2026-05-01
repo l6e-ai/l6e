@@ -2,13 +2,12 @@
 
 This module is imported by:
 
-- ``l6e.gate.ConstraintGate`` (OSS, in-process): wraps ``decide`` with an
+- ``l6e.gate.ConstraintGate`` (in-process): wraps ``decide`` with an
   ``ILocalRouter`` to resolve reroute targets to a concrete local model.
-- ``hosted-edge`` ``/v1/authorize`` (cloud): mirrors this logic on the
-  server side so SDK callers and MCP clients get identical decisions.
-  The cloud copy lives in ``hosted-edge/src/enforcement/gate_core.py`` and
-  is kept honest by the golden parity matrix at
-  ``l6e/tests/fixtures/gate_parity_matrix.json`` (see L6E-40).
+- The cloud authorize endpoint (server-side): mirrors this logic so SDK
+  callers and MCP clients get identical decisions. A golden parity
+  matrix at ``l6e/tests/fixtures/gate_parity_matrix.json`` is exercised
+  from both sides in CI to keep the two copies honest.
 
 Keep this module pure:
 
@@ -30,9 +29,8 @@ Priority ladder (matches docstring on ``ConstraintGate``):
 5. Allow                — default.
 
 ``complexity`` is accepted today but not consulted by any path. It's
-reserved for future Margin-layer routing decisions and kept on the
-signature so server and core agree on the accepted input surface. Do
-not remove.
+reserved for future routing decisions and kept on the signature so
+server and core agree on the accepted input surface. Do not remove.
 """
 from __future__ import annotations
 

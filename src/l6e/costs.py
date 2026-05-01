@@ -325,7 +325,7 @@ def _merge_fetched_cost_map(fetched: dict[str, Any]) -> None:
        time via ``add_known_models``; updating ``model_cost`` post-import
        does not flow through to them. The symptom of forgetting this step
        is ``BadRequestError: LLM Provider NOT provided`` for a model that
-       is in ``model_cost`` — see the L6E-86 diagnostic on 2026-04-25.
+       is present in ``model_cost``.
     3. ``_LITELLM_BARE_KEYS`` — our own fuzzy-resolver cache; invalidated
        so the next ``resolve_model_id`` call rebuilds it from the merged
        ``litellm.model_cost``.

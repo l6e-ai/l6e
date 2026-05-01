@@ -8,8 +8,7 @@ Iron rule: **the gate fails open, always.** Every public entry point
 wraps its internals so an unexpected exception in l6e collaborators never
 propagates into customer code. A crashed gate degrades to an "allow" pass
 through to the customer's original model request. See
-``pivot-docs/cost-benchmark-margin-thesis/05-integration-architecture.md``
-and ``docs/runbooks/fails-open-matrix.md``.
+``docs/runbooks/fails-open-matrix.md`` for the full failure-mode matrix.
 """
 from __future__ import annotations
 
@@ -21,11 +20,14 @@ from collections.abc import Callable
 from decimal import Decimal
 from pathlib import Path
 from types import TracebackType
-from typing import Literal
+from typing import TYPE_CHECKING, Literal
 
 from l6e._classify import PromptComplexityClassifier
 from l6e._log import LocalRunLog
 from l6e._protocols import IConstraintGate, ICostEstimator, ILocalRouter, IRunStore
+
+if TYPE_CHECKING:
+    from l6e.cloud import CloudConfig
 from l6e._response import extract_token_usage
 from l6e._types import (
     BudgetStatus,
@@ -208,11 +210,20 @@ class PipelineContext:
         user_id: str | None = None,
         tenant_id: str | None = None,
         cohort_hint: str | None = None,
+        calibration_factor: Decimal | None = None,
     ) -> CallRecord:
         """Record a completed call. Extracts token usage, estimates cost, appends to store.
 
         ``user_id`` / ``tenant_id`` / ``cohort_hint`` are persisted on the
         ``CallRecord`` for downstream telemetry (RunSummary, SaaS profiler).
+
+        ``calibration_factor``: when supplied, the local cost estimate
+        is multiplied by it before stamping ``CallRecord.cost_usd``. The
+        factor is the per-user multiplier returned by the cloud's
+        ``/v1/authorize`` at advise-time and cached on ``GateDecision``;
+        applying it post-call yields "calibrated actual" cost rather
+        than "calibrated estimate". A non-positive or broken factor is
+        silently ignored — fail-open extends to accounting accuracy.
 
         Fail-open contract: any exception during token extraction, cost
         estimation, or store write is logged and a best-effort
@@ -231,6 +242,15 @@ class PipelineContext:
         except Exception:
             _logger.warning("l6e_cost_estimate_failed", exc_info=True)
             cost = Decimal("0")
+        if calibration_factor is not None:
+            try:
+                # Decimal multiplication preserves the precision of the
+                # local estimate; Decimal(str(factor)) is how we got
+                # there in the first place via _decimal_or_none.
+                if calibration_factor > 0:
+                    cost = cost * calibration_factor
+            except Exception:
+                _logger.warning("l6e_calibration_factor_apply_failed", exc_info=True)
         with self._lock:
             call_index = self._call_index
             self._call_index += 1
@@ -420,6 +440,11 @@ class PipelineContext:
                 user_id=user_id,
                 tenant_id=tenant_id,
                 cohort_hint=cohort_hint,
+                # Forward the cloud's per-user calibration factor
+                # (cached on ``decision`` by ``RemoteConstraintGate``) so
+                # ``CallRecord.cost_usd`` ends up calibrated. ``None``
+                # for the local-only gate, which is correct.
+                calibration_factor=decision.calibration_factor,
             )
         except Exception:
             _logger.warning("l6e_call_record_failed_fail_open", exc_info=True)
@@ -454,6 +479,8 @@ def pipeline(
     log_path: Path | None = None,
     router: ILocalRouter | None = None,
     source: str = "pipeline",
+    *,
+    cloud: CloudConfig | None = None,
 ) -> PipelineContext:
     """Construct a fully-wired PipelineContext with default concrete collaborators.
 
@@ -468,9 +495,16 @@ def pipeline(
                   without touching any other part of the pipeline.
         source:   Origin of the run — ``"pipeline"`` for OSS runs, ``"mcp"`` for
                   MCP session runs. Written to ``RunSummary.source`` in the log.
+        cloud:    Optional ``CloudConfig`` enabling SDK cloud-sync. When
+                  ``None`` (default) the pipeline uses a pure local
+                  ``ConstraintGate`` — today's behavior, no network
+                  calls. When provided, wires ``RemoteConstraintGate``
+                  which POSTs to ``{cloud.base_url}/v1/authorize`` per
+                  ``check()`` and falls open to the local gate on every
+                  failure path.
     """
     from l6e.costs import LiteLLMCostEstimator
-    from l6e.gate import ConstraintGate
+    from l6e.gate import ConstraintGate, RemoteConstraintGate
     from l6e.router import LocalRouter
     from l6e.store import InMemoryRunStore
 
@@ -479,7 +513,13 @@ def pipeline(
         fallback_cost_per_1k_tokens=policy.unknown_model_cost_per_1k_tokens
     )
     effective_router = router if router is not None else LocalRouter()
-    gate = ConstraintGate(policy=policy, router=effective_router)
+    gate: IConstraintGate
+    if cloud is not None:
+        gate = RemoteConstraintGate(
+            policy=policy, router=effective_router, cloud=cloud,
+        )
+    else:
+        gate = ConstraintGate(policy=policy, router=effective_router)
     store = InMemoryRunStore(
         run_id=effective_run_id, policy=policy, estimator=estimator, source=source
     )

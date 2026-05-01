@@ -23,6 +23,7 @@ from l6e._types import (
     StageRoutingHint,
     UnknownModelPricingMode,
 )
+from l6e.cloud import CloudConfig
 from l6e.exceptions import BudgetExceeded
 from l6e.exceptions import LatencySLAExceeded as LatencySLAExceeded
 from l6e.pipeline import PipelineContext, pipeline
@@ -34,10 +35,11 @@ __all__ = [
     "RunSummary",
     "BudgetMode",
     "BudgetStatus",
+    "CloudConfig",
     "PipelinePolicy",
     "OnBudgetExceeded",
     "PromptComplexity",
     "StageRoutingHint",
     "UnknownModelPricingMode",
 ]
-__version__ = "0.4.2"
+__version__ = "0.5.0"
