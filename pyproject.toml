@@ -18,8 +18,8 @@ requires-python = ">=3.11"
 dependencies = [
     "litellm>=1.0.0",
     "tiktoken>=0.7.0",
-    # ``httpx`` is required for ``RemoteConstraintGate`` (Tier 3 SDK
-    # cloud-sync, L6E-73). ``litellm`` already pins it transitively;
+    # ``httpx`` is required for ``RemoteConstraintGate`` (the opt-in
+    # cloud-sync gate). ``litellm`` already pins it transitively;
     # listing it here makes the SDK's own usage auditable rather than
     # relying on a transitive dep.
     "httpx>=0.25",

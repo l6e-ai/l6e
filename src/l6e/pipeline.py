@@ -218,14 +218,13 @@ class PipelineContext:
         ``user_id`` / ``tenant_id`` / ``cohort_hint`` are persisted on the
         ``CallRecord`` for downstream telemetry (RunSummary, SaaS profiler).
 
-        ``calibration_factor`` (L6E-73 Q1(a)): when supplied, the local
-        cost estimate is multiplied by it before stamping
-        ``CallRecord.cost_usd``. The factor is the per-user multiplier
-        returned by the cloud's ``/v1/authorize`` at advise-time and
-        cached on ``GateDecision``; applying it post-call yields
-        "calibrated actual" cost rather than "calibrated estimate". A
-        broken or NaN factor is silently ignored — fail-open extends to
-        accounting accuracy.
+        ``calibration_factor``: when supplied, the local cost estimate
+        is multiplied by it before stamping ``CallRecord.cost_usd``. The
+        factor is the per-user multiplier returned by the cloud's
+        ``/v1/authorize`` at advise-time and cached on ``GateDecision``;
+        applying it post-call yields "calibrated actual" cost rather
+        than "calibrated estimate". A non-positive or broken factor is
+        silently ignored — fail-open extends to accounting accuracy.
 
         Fail-open contract: any exception during token extraction, cost
         estimation, or store write is logged and a best-effort
@@ -442,10 +441,10 @@ class PipelineContext:
                 user_id=user_id,
                 tenant_id=tenant_id,
                 cohort_hint=cohort_hint,
-                # Q1(a): forward the cloud's per-user calibration factor
+                # Forward the cloud's per-user calibration factor
                 # (cached on ``decision`` by ``RemoteConstraintGate``) so
                 # ``CallRecord.cost_usd`` ends up calibrated. ``None``
-                # for the OSS local-only gate, which is correct.
+                # for the local-only gate, which is correct.
                 calibration_factor=decision.calibration_factor,
             )
         except Exception:
@@ -497,14 +496,13 @@ def pipeline(
                   without touching any other part of the pipeline.
         source:   Origin of the run — ``"pipeline"`` for OSS runs, ``"mcp"`` for
                   MCP session runs. Written to ``RunSummary.source`` in the log.
-        cloud:    Optional ``CloudConfig`` enabling Tier 3 SDK cloud-sync
-                  (L6E-73). When ``None`` (default) the pipeline uses a pure
-                  local ``ConstraintGate`` — today's behavior, no network
-                  calls. When provided, wires ``RemoteConstraintGate`` which
-                  POSTs to ``{cloud.base_url}/v1/authorize`` per ``check()``
-                  and falls open to the local gate on every failure path.
-                  See ``pivot-docs/cost-benchmark-margin-thesis/05-integration-architecture.md``
-                  § "Tier 3: SDK cloud-sync".
+        cloud:    Optional ``CloudConfig`` enabling SDK cloud-sync. When
+                  ``None`` (default) the pipeline uses a pure local
+                  ``ConstraintGate`` — today's behavior, no network
+                  calls. When provided, wires ``RemoteConstraintGate``
+                  which POSTs to ``{cloud.base_url}/v1/authorize`` per
+                  ``check()`` and falls open to the local gate on every
+                  failure path.
     """
     from l6e.costs import LiteLLMCostEstimator
     from l6e.gate import ConstraintGate, RemoteConstraintGate

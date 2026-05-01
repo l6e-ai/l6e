@@ -10,10 +10,10 @@ for a reroute, we consult ``ILocalRouter.best_local_model()`` and
 halt cleanly when no local model is available.
 
 ``RemoteConstraintGate`` (sibling, opt-in) extends the local gate with a
-synchronous ``POST /v1/authorize`` call that flips the SDK into Tier 3
-"SDK cloud-sync" mode (see L6E-73). It always wraps an inner local gate
-and falls open to the local decision on every failure path, in line with
-L6E-41's iron rule.
+synchronous ``POST /v1/authorize`` call that activates the SDK
+cloud-sync integration tier. It always wraps an inner local gate and
+falls open to the local decision on every failure path — the gate fails
+open, always.
 """
 from __future__ import annotations
 
@@ -120,7 +120,7 @@ class ConstraintGate:
 
 
 # ---------------------------------------------------------------------------
-# RemoteConstraintGate — Tier 3 SDK cloud-sync (L6E-73).
+# RemoteConstraintGate — opt-in SDK cloud-sync.
 # ---------------------------------------------------------------------------
 
 
@@ -147,14 +147,14 @@ def _apply_cloud_response(
 ) -> GateDecision:
     """Map a sanitized ``/v1/authorize`` response into a ``GateDecision``.
 
-    Pure function — no I/O, no side effects. Extracted so the future
-    fire-and-forget allow-path mode (Q2(b) follow-up) can reuse the
-    mapping without re-running the HTTP call.
+    Pure function — no I/O, no side effects. Kept extracted so a future
+    fire-and-forget allow-path mode can reuse the mapping without
+    re-running the HTTP call.
 
     Reroute target resolution: prefer the server's
-    ``routed_model_suggestion`` when present (Margin tier). Otherwise
-    consult the local router so cloud-sync still works for OSS callers
-    on a metadata-tier policy. If neither yields a target, halt cleanly
+    ``routed_model_suggestion`` when present. Otherwise consult the
+    local router so cloud-sync still works for callers on a
+    metadata-tier policy. If neither yields a target, halt cleanly
     rather than allow with an arbitrary model — same fail-safe stance
     as ``ConstraintGate._materialize``.
     """
@@ -240,25 +240,26 @@ class RemoteConstraintGate(ConstraintGate):
     """Cloud-sync gate. Wraps a local ``ConstraintGate`` and POSTs to
     ``{cloud.base_url}/v1/authorize`` on every ``check()``.
 
-    Failure handling (L6E-41 iron rule):
+    Failure handling — the gate fails open, always:
 
-    - any HTTP failure (timeout, network, non-200, malformed JSON, garbage
-      envelope) → delegate to ``super().check(...)`` and stamp
+    - any HTTP failure (timeout, network, non-200, malformed JSON,
+      garbage envelope) → delegate to ``super().check(...)`` and stamp
       ``calibration_source='local_fallback'`` plus a stable
       ``fail_open:cloud_*`` reason on the returned ``GateDecision``.
     - any unexpected exception in body construction or response mapping
       → same: fall through to local. Never raises into customer code.
 
-    Identity plumbing (L6E-39): ``user_id`` / ``tenant_id`` / ``cohort_hint``
-    are forwarded into the request body verbatim. A ``user_id`` alone is
-    enough to flip the server into Margin-aware mode (verified against
-    ``hosted-edge/src/relay/routers/authorize.py:_MARGIN_REQUEST_FIELDS``).
+    Identity plumbing: ``user_id`` / ``tenant_id`` / ``cohort_hint`` (the
+    optional kwargs already accepted by ``ctx.call`` / ``ctx.advise`` /
+    ``ctx.record``) are forwarded into the request body verbatim. The
+    presence of any one of them flips the server into its identity-aware
+    response mode.
 
-    Latency (Q2(a)): synchronous block. The cloud HTTP call honors
+    Latency posture: synchronous block. The cloud HTTP call honors
     ``cfg.latency_deadline_ms`` as a hard local timeout; on exceed the
-    request is treated as down and we fail open. Future Q2(b) async
-    follow-up will reuse this class's helpers without changing the
-    public contract.
+    request is treated as down and we fail open. A future fire-and-forget
+    allow-path mode would reuse this class's helpers without changing
+    the public contract.
     """
 
     def __init__(
@@ -391,12 +392,11 @@ class RemoteConstraintGate(ConstraintGate):
     ) -> dict[str, Any]:
         """Assemble the ``/v1/authorize`` request body.
 
-        Wire shape mirrors the additive Margin-tier schema in
-        ``hosted-edge/src/relay/routers/authorize.py`` and
-        ``mcp/src/l6e_mcp/core/remote_authorize.py``. Identity fields
-        (``user_id`` / ``tenant_id`` / ``cohort_hint``) are forwarded
-        only when present so non-Margin SDK callers keep landing in
-        ``authorize_events`` as non-Margin rows.
+        Identity fields (``user_id`` / ``tenant_id`` / ``cohort_hint``)
+        are forwarded only when supplied, so callers without identity
+        plumbing keep landing on the server's non-identity response
+        shape. The schema is additive: unknown fields are ignored on
+        older server versions, preserving deployment ordering freedom.
         """
         budget = Decimal(str(self._policy.budget))
         body: dict[str, Any] = {

@@ -140,11 +140,11 @@ class TestCloudConfigValidation:
         )
 
     def test_embeddings_tier_raises_not_implemented(self) -> None:
-        with pytest.raises(NotImplementedError, match="L6E-64"):
+        with pytest.raises(NotImplementedError, match="not yet"):
             CloudConfig(api_key="sk", privacy_tier="embeddings")  # type: ignore[arg-type]
 
     def test_hashed_prompts_tier_raises_not_implemented(self) -> None:
-        with pytest.raises(NotImplementedError, match="L6E-64"):
+        with pytest.raises(NotImplementedError, match="not yet"):
             CloudConfig(api_key="sk", privacy_tier="hashed_prompts")  # type: ignore[arg-type]
 
     def test_zero_timeout_rejected(self) -> None:

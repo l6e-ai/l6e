@@ -179,10 +179,10 @@ class GateDecision:
     action: Literal["allow", "reroute", "halt"]
     target_model: str
     reason: str
-    # Optional fields populated by ``RemoteConstraintGate`` when cloud-sync
-    # is enabled. All ``None`` for the OSS local-only gate so existing
+    # Optional fields populated by ``RemoteConstraintGate`` when cloud
+    # sync is enabled. All ``None`` for the local-only gate so existing
     # callers (and the parity matrix tests) remain unchanged. Downstream
-    # reporting and the Margin dashboard read these directly.
+    # reporting reads these directly.
     #
     # ``calibration_source`` mirrors the server's tag ("personal" /
     # "community" / "none"). It is also set to "local_fallback" when the
@@ -190,7 +190,7 @@ class GateDecision:
     calibration_source: str | None = None
     # Cached at advise-time and re-applied at record-time so
     # ``CallRecord.cost_usd`` is the calibrated *actual* cost (post-call
-    # token counts × server's per-user multiplier). See L6E-73 Q1(a).
+    # token counts × the server's per-user multiplier).
     calibration_factor: Decimal | None = None
     predicted_cost_mean_usd: Decimal | None = None
     predicted_cost_p95_usd: Decimal | None = None

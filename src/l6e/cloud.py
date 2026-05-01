@@ -1,29 +1,28 @@
 """Cloud-sync configuration and ``/v1/authorize`` client for the SDK.
 
-Opt-in surface for **Tier 3 (SDK cloud-sync)** in
-``pivot-docs/cost-benchmark-margin-thesis/05-integration-architecture.md``.
-A customer wires it via the ``cloud=`` kwarg on ``pipeline()`` (see L6E-73);
-absent that kwarg, the SDK behaves exactly as it did before this module
-existed.
+Opt-in surface for the cloud-sync integration tier. A customer wires it
+via the ``cloud=`` kwarg on ``pipeline()``; absent that kwarg, the SDK
+behaves exactly as it did before this module existed (purely local
+enforcement, no network calls).
 
 This module owns three responsibilities:
 
 1. ``CloudConfig`` — the user-facing configuration surface.
 2. ``_post_authorize`` — the synchronous HTTP client for
-   ``POST /v1/authorize``. Sibling to (and modeled directly on)
-   ``mcp/src/l6e_mcp/core/remote_authorize.py``: returns ``None`` on every
-   failure path so the caller can fall back to local enforcement, per
-   L6E-41's iron rule.
+   ``POST /v1/authorize``. Returns ``None`` on every failure path
+   (timeout, non-2xx, malformed JSON, network exception, missing API
+   key, garbage envelope) so the caller can fall back to local
+   enforcement. The gate fails open, always — that's the iron rule.
 3. ``_sanitize_authorize_response`` — defensive validation of the server
    envelope before any field is used to drive a ``GateDecision``. NaN /
    negative / missing-action / unknown-pressure-label all collapse to
    ``None`` so a poisoned response can't quietly corrupt downstream state.
 
-Q2(a) decision (synchronous block with tight ``latency_deadline_ms``,
-fail-open on exceed) is realized here: ``_post_authorize`` honors the
-deadline as a local timeout floor and never raises into caller code.
-A future fire-and-forget allow-path mode (Q2(b), tracked as a follow-up
-ticket) would wrap this module's helpers, not replace them.
+The current latency posture is synchronous block with a tight
+``latency_deadline_ms`` and fail-open on exceed: ``_post_authorize``
+honors the deadline as a local timeout floor and never raises into
+caller code. A future fire-and-forget allow-path mode would wrap this
+module's helpers rather than replacing them.
 """
 from __future__ import annotations
 
@@ -42,22 +41,21 @@ logger = logging.getLogger(__name__)
 
 PrivacyTier = Literal["metadata", "embeddings", "hashed_prompts"]
 
-# The only privacy tier wired up in M0. ``embeddings`` and
-# ``hashed_prompts`` block on L6E-64 / L6E-68 — the customer-side
-# embedder choice and default-tier decision. Until those land, accepting
-# the strings silently would be a bug surface (operator thinks they have
-# embeddings when they don't), so ``CloudConfig`` rejects them at
-# construction with a pointer to the follow-up issues.
+# The only privacy tier wired up today. ``embeddings`` and
+# ``hashed_prompts`` are reserved on the public type so opt-in flags
+# don't break compatibility when they ship, but accepting them silently
+# now would be a bug surface (operator thinks they have embeddings when
+# they don't). ``CloudConfig`` therefore rejects them at construction.
 _SUPPORTED_PRIVACY_TIERS: frozenset[str] = frozenset({"metadata"})
 _PRIVACY_TIER_FOLLOWUP_HINT = (
-    "embeddings / hashed_prompts privacy tiers are not yet implemented; "
-    "see L6E-64 (privacy default decision) and L6E-68 (client-side "
-    "embedder design) for the blocking work."
+    "embeddings / hashed_prompts privacy tiers are not yet implemented "
+    "and will raise at construction. Use privacy_tier='metadata' until "
+    "client-side embedding support ships in a future release."
 )
 
-# Server response envelope contracts. Kept in sync with the matching
-# constants in ``mcp/src/l6e_mcp/server.py`` (``_VALID_SERVER_ACTIONS``
-# etc.) — the two clients consume the same wire schema.
+# Server response envelope contracts. The MCP client consumes the same
+# wire schema, so the two clients must agree on what "valid envelope"
+# means or one of them will corrupt local state when the server drifts.
 _VALID_SERVER_ACTIONS: frozenset[str] = frozenset({"allow", "reroute", "halt"})
 _VALID_BUDGET_PRESSURE: frozenset[str] = frozenset(
     {"low", "moderate", "high", "critical"}
@@ -76,7 +74,7 @@ class CloudConfig:
 
     - ``timeout_s`` and ``latency_deadline_ms`` must be finite and > 0.
     - ``privacy_tier`` outside ``metadata`` raises ``NotImplementedError``
-      pointing at L6E-64 / L6E-68.
+      pending future client-side embedding support.
     - ``api_key`` resolves at construction time: explicit kwarg wins,
       else ``os.environ["L6E_API_KEY"]``, else ``None``. A ``None`` key
       after resolution does *not* raise — it's logged at WARNING and
@@ -134,8 +132,8 @@ class CloudConfig:
 
 
 # ---------------------------------------------------------------------------
-# Shared sync httpx.Client — module-singleton with atexit cleanup. Mirrors
-# the async-client pattern in mcp/src/l6e_mcp/core/remote_authorize.py.
+# Shared sync httpx.Client — module-singleton with atexit cleanup. Reusing
+# a single client across calls eliminates per-request DNS and TLS overhead.
 # ---------------------------------------------------------------------------
 
 _client: httpx.Client | None = None
@@ -204,10 +202,10 @@ def _sanitize_authorize_response(resp: object) -> dict[str, Any] | None:
     """Validate a ``/v1/authorize`` response envelope.
 
     Returns the dict on success or ``None`` on any garbage that should
-    trigger fail-open. Mirrors ``mcp/src/l6e_mcp/server.py
-    ._sanitize_server_authorize_response`` field-for-field — the two
-    clients must agree on what "valid envelope" means or one of them is
-    going to corrupt local state when the server drifts.
+    trigger fail-open. The validation rules match the MCP client's
+    sanitizer field-for-field: the two clients must agree on what
+    "valid envelope" means or one of them will corrupt local state when
+    the server drifts.
     """
     if not isinstance(resp, dict):
         return None
