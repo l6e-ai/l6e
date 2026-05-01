@@ -7,6 +7,23 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.0] - 2026-05-01
+
+### Added
+
+- **Tier 3 SDK cloud-sync via `RemoteConstraintGate`** (L6E-73). New opt-in `cloud=CloudConfig(...)` kwarg on `pipeline()` wires a sibling gate that POSTs to `{base_url}/v1/authorize` on every `check()` and falls open to the local `ConstraintGate` on every failure path (timeout, non-200, malformed JSON, garbage envelope, missing API key). Identity kwargs already on `ctx.call()` (`user_id`, `tenant_id`, `cohort_hint` from L6E-39) round-trip into the request body verbatim — presence of any one flips the server into Margin response mode. Absent `cloud=`, behavior is unchanged. See `pivot-docs/cost-benchmark-margin-thesis/05-integration-architecture.md` § "Tier 3: SDK cloud-sync".
+- **`CloudConfig` (`l6e.CloudConfig`)** — new public type. Fields: `base_url`, `api_key` (resolves from `L6E_API_KEY` env when omitted; missing key fails open with a `WARNING`), `timeout_s=0.250`, `latency_deadline_ms=250`, `privacy_tier="metadata"`. `embeddings` and `hashed_prompts` privacy tiers raise `NotImplementedError` at construction pending L6E-64 / L6E-68.
+- **Additive optional fields on `GateDecision`** — `calibration_source`, `calibration_factor`, `predicted_cost_mean_usd`, `predicted_cost_p95_usd`, `policy_id_applied`. All default `None` for the OSS local-only gate so existing consumers and the parity-matrix tests are unchanged.
+- **Calibrated-cost flow into `CallRecord.cost_usd`** — when cloud-sync is enabled, the server's per-user `calibration_factor` is cached on the advise-time `GateDecision` and re-applied at record-time. `cost_usd` is therefore "calibrated actual" cost (local estimate × server factor) rather than raw local estimate. Backward-compatible: `record(calibration_factor=None)` (the OSS default) leaves `cost_usd` unchanged.
+
+### Stable log keys
+
+`cloud_authorize_no_api_key`, `cloud_authorize_timeout`, `cloud_authorize_5xx`, `cloud_authorize_bad_json`, `cloud_authorize_invalid_envelope`, `cloud_authorize_failed` — all at WARNING. Fail-open `GateDecision.reason` prefixes: `fail_open:cloud_network`, `fail_open:cloud_build_body`, `fail_open:cloud_response_map`. `GateDecision.calibration_source="local_fallback"` distinguishes "cloud said allow" from "cloud unreachable, local said allow".
+
+### Dependencies
+
+- Added `httpx>=0.25` as a direct dependency (was already present transitively via `litellm`; now declared so the SDK's own usage is auditable).
+
 ## [0.4.0] - 2026-04-24
 
 ### Changed
