@@ -99,6 +99,7 @@ class FakeGate:
         user_id: str | None = None,
         tenant_id: str | None = None,
         cohort_hint: str | None = None,
+        prompts: list[str] | None = None,
     ) -> GateDecision:
         return self._decision
 
@@ -113,6 +114,7 @@ class SpyGate:
         self.last_user_id: str | None = None
         self.last_tenant_id: str | None = None
         self.last_cohort_hint: str | None = None
+        self.last_prompts: list[str] | None = None
 
     def check(
         self,
@@ -125,12 +127,14 @@ class SpyGate:
         user_id: str | None = None,
         tenant_id: str | None = None,
         cohort_hint: str | None = None,
+        prompts: list[str] | None = None,
     ) -> GateDecision:
         self.last_stage = stage
         self.last_model = model
         self.last_user_id = user_id
         self.last_tenant_id = tenant_id
         self.last_cohort_hint = cohort_hint
+        self.last_prompts = prompts
         return self._decision
 
 

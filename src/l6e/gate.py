@@ -24,7 +24,7 @@ from typing import Any
 from l6e._gate_core import GateCoreOutcome, decide
 from l6e._protocols import ILocalRouter, IRunStore
 from l6e._types import GateDecision, PipelinePolicy, PromptComplexity
-from l6e.cloud import CloudConfig, _post_authorize
+from l6e.cloud import CloudConfig, _post_authorize, _safe_embed
 
 logger = logging.getLogger(__name__)
 
@@ -75,10 +75,13 @@ class ConstraintGate:
         user_id: str | None = None,
         tenant_id: str | None = None,
         cohort_hint: str | None = None,
+        prompts: list[str] | None = None,
     ) -> GateDecision:
-        # Identity kwargs are accepted for protocol compatibility and future
-        # cohort-aware routing; the OSS ConstraintGate does not act on them.
-        del user_id, tenant_id, cohort_hint
+        # Identity kwargs and prompts are accepted for protocol
+        # compatibility (future cohort-aware routing; embeddings tier in
+        # ``RemoteConstraintGate``); the OSS ConstraintGate does not act
+        # on them.
+        del user_id, tenant_id, cohort_hint, prompts
         policy = self._policy
 
         outcome = decide(
@@ -282,6 +285,7 @@ class RemoteConstraintGate(ConstraintGate):
         user_id: str | None = None,
         tenant_id: str | None = None,
         cohort_hint: str | None = None,
+        prompts: list[str] | None = None,
     ) -> GateDecision:
         # Iron-rule outer try: nothing in this method may surface an
         # exception to ``PipelineContext.advise``. Any unhandled error
@@ -296,6 +300,7 @@ class RemoteConstraintGate(ConstraintGate):
                 user_id=user_id,
                 tenant_id=tenant_id,
                 cohort_hint=cohort_hint,
+                prompts=prompts,
             )
         except Exception:
             logger.warning("remote_gate_unhandled_exception", exc_info=True)
@@ -308,6 +313,7 @@ class RemoteConstraintGate(ConstraintGate):
                 user_id=user_id,
                 tenant_id=tenant_id,
                 cohort_hint=cohort_hint,
+                prompts=prompts,
             )
             return _decorate_local_fallback(
                 local, fallback_reason=_FAIL_OPEN_CLOUD_NETWORK,
@@ -324,6 +330,7 @@ class RemoteConstraintGate(ConstraintGate):
         user_id: str | None,
         tenant_id: str | None,
         cohort_hint: str | None,
+        prompts: list[str] | None,
     ) -> GateDecision:
         # Pre-compute local fallback once; every failure path returns it.
         # Building it here also catches any local-gate misconfiguration
@@ -337,7 +344,23 @@ class RemoteConstraintGate(ConstraintGate):
             user_id=user_id,
             tenant_id=tenant_id,
             cohort_hint=cohort_hint,
+            prompts=prompts,
         )
+
+        # Embed before body construction: an embedder failure must NOT
+        # block the cloud call (Q2=β — strip embedding, still POST as
+        # metadata). ``_safe_embed`` returns ``None`` on any failure
+        # mode and emits ``cloud_embedding_failed`` at WARNING; the
+        # GateDecision keeps the cloud's own reason — no
+        # ``fail_open:cloud_embedding_*`` prefix, since the cloud's
+        # decision is still authoritative.
+        request_embedding: list[float] | None = None
+        if (
+            self._cloud.privacy_tier == "embeddings"
+            and self._cloud.embedder is not None
+            and prompts
+        ):
+            request_embedding = _safe_embed(self._cloud.embedder, prompts)
 
         try:
             body = self._build_body(
@@ -349,6 +372,7 @@ class RemoteConstraintGate(ConstraintGate):
                 user_id=user_id,
                 tenant_id=tenant_id,
                 cohort_hint=cohort_hint,
+                request_embedding=request_embedding,
             )
         except Exception:
             logger.warning("remote_gate_build_body_failed", exc_info=True)
@@ -389,6 +413,7 @@ class RemoteConstraintGate(ConstraintGate):
         user_id: str | None,
         tenant_id: str | None,
         cohort_hint: str | None,
+        request_embedding: list[float] | None = None,
     ) -> dict[str, Any]:
         """Assemble the ``/v1/authorize`` request body.
 
@@ -397,6 +422,15 @@ class RemoteConstraintGate(ConstraintGate):
         plumbing keep landing on the server's non-identity response
         shape. The schema is additive: unknown fields are ignored on
         older server versions, preserving deployment ordering freedom.
+
+        ``request_embedding`` is the customer-side embedding produced by
+        ``CloudConfig.embedder`` when ``privacy_tier="embeddings"``. The
+        caller (``_check_with_cloud``) is responsible for invoking the
+        embedder and validating the shape via ``_safe_embed`` before
+        passing the vector here — this method does not re-validate. When
+        ``None``, the field is omitted from the body, which the server
+        treats as a metadata-tier request. This is the metadata-tier
+        fallback path on embedder failure.
         """
         budget = Decimal(str(self._policy.budget))
         body: dict[str, Any] = {
@@ -419,4 +453,6 @@ class RemoteConstraintGate(ConstraintGate):
             body["tenant_id"] = tenant_id
         if cohort_hint is not None:
             body["cohort_hint"] = cohort_hint
+        if request_embedding is not None:
+            body["request_embedding"] = request_embedding
         return body

@@ -1,0 +1,155 @@
+{
+  "$schema_notes": [
+    "Golden parity matrix for L6E-101 — embedding wire-shape contract.",
+    "Canonical path: l6e/tests/fixtures/embedding_validation_parity.json",
+    "  - l6e/tests/unit/test_embedding_parity.py (runs l6e.cloud._validate_embedding)",
+    "  - hosted-edge/tests/test_embedding_parity.py (runs POST /v1/authorize; reads this file from sibling l6e/ in monorepo)",
+    "Both sides must agree on every case. If you tighten or loosen one side,",
+    "regenerate this file and run BOTH suites before merging.",
+    "",
+    "Encoding (kept strict-JSON-portable so jq / tooling work):",
+    "  String element sentinels (substituted at test load time):",
+    "    \"__nan__\"     → float('nan')",
+    "    \"__inf__\"     → float('inf')",
+    "    \"__neg_inf__\" → float('-inf')",
+    "  Inflated inputs (avoid 4096-element JSON arrays inline):",
+    "    {\"__repeat__\": {\"value\": V, \"count\": N}}",
+    "    → expanded to a list of N copies of V before the test consumes it.",
+    "",
+    "Case schema:",
+    "  name             : kebab-case test ID, must be unique",
+    "  input            : the value passed to _validate_embedding / sent on the wire",
+    "  expected         : 'valid' | 'invalid'",
+    "  expected_coerced : optional list of floats; when present, the SDK validator",
+    "                     must return exactly this list. Mainly for int→float coercion cases.",
+    "  notes            : optional human-readable rationale",
+    "",
+    "Server-side wire shape: send {... base body ..., \"request_embedding\": <input>}.",
+    "  expected='valid'   → POST returns 200",
+    "  expected='invalid' → POST returns 400",
+    "Null input is intentionally NOT covered — the absence sentinel is a separate",
+    "concern from the shape contract; both sides treat null as 'no embedding'."
+  ],
+  "cases": [
+    {
+      "name": "valid_floats",
+      "input": [0.1, -0.2, 0.0],
+      "expected": "valid",
+      "expected_coerced": [0.1, -0.2, 0.0]
+    },
+    {
+      "name": "valid_single_element",
+      "input": [0.42],
+      "expected": "valid",
+      "expected_coerced": [0.42]
+    },
+    {
+      "name": "valid_ints_coerced_to_floats",
+      "input": [1, 2, 3],
+      "expected": "valid",
+      "expected_coerced": [1.0, 2.0, 3.0]
+    },
+    {
+      "name": "valid_negative_zero",
+      "input": [-0.0, 0.0],
+      "expected": "valid",
+      "expected_coerced": [-0.0, 0.0]
+    },
+    {
+      "name": "valid_at_dim_cap_4096",
+      "input": {"__repeat__": {"value": 0.0, "count": 4096}},
+      "expected": "valid",
+      "notes": "Boundary: exactly _MAX_EMBEDDING_DIM is allowed."
+    },
+    {
+      "name": "valid_typical_1536_openai_sized",
+      "input": {"__repeat__": {"value": 0.001, "count": 1536}},
+      "expected": "valid",
+      "notes": "Common embedder dim (text-embedding-3-small) — sanity check."
+    },
+    {
+      "name": "rejects_above_dim_cap_4097",
+      "input": {"__repeat__": {"value": 0.0, "count": 4097}},
+      "expected": "invalid",
+      "notes": "Boundary: one over the cap must reject."
+    },
+    {
+      "name": "rejects_empty_list",
+      "input": [],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_nan_element",
+      "input": [0.1, "__nan__", 0.2],
+      "expected": "invalid",
+      "notes": "NaN-in would propagate poisonously through the Layer 2 predictor (L6E-68). Catch at the wire."
+    },
+    {
+      "name": "rejects_pos_inf_element",
+      "input": [0.1, "__inf__"],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_neg_inf_element",
+      "input": [0.1, "__neg_inf__"],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_bool_true_element",
+      "input": [0.1, true],
+      "expected": "invalid",
+      "notes": "bool is an int subclass; silent True→1 promotion would mask wire bugs."
+    },
+    {
+      "name": "rejects_bool_false_element",
+      "input": [false, 0.0],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_string_element",
+      "input": [0.1, "0.2", 0.3],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_null_element",
+      "input": [0.1, null, 0.3],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_nested_list_element",
+      "input": [0.1, [0.2], 0.3],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_nested_dict_element",
+      "input": [0.1, {"v": 0.2}, 0.3],
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_string_input",
+      "input": "0.1,0.2",
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_dict_input",
+      "input": {"v": 0.1},
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_int_input",
+      "input": 42,
+      "expected": "invalid",
+      "notes": "Bare scalar — must be a list."
+    },
+    {
+      "name": "rejects_float_input",
+      "input": 0.5,
+      "expected": "invalid"
+    },
+    {
+      "name": "rejects_bool_input",
+      "input": true,
+      "expected": "invalid"
+    }
+  ]
+}
