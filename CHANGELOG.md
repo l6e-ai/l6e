@@ -7,6 +7,25 @@ Versioning follows [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 ---
 
+## [0.5.1] - 2026-05-04
+
+### Added
+
+- **Embeddings privacy tier on `CloudConfig` (L6E-97 / absorbs L6E-68 SDK-side scope).** `CloudConfig(privacy_tier="embeddings", embedder=<callable[[list[str]], list[float]]>)` now constructs without raising. The embedder is invoked over user-role prompts before each cloud authorize call and the resulting vector is attached as `request_embedding` on the body. **Bring-your-own** — the SDK does not prescribe an embedding model. Customer pooling (mean / first-only / concat-then-embed) is whatever the embedder returns.
+- **`CloudConfig.embedder`** — new optional field. Required when `privacy_tier="embeddings"`; setting it under `privacy_tier="metadata"` is allowed and silently unused so customers can flip tiers via env without conditional removal. Construction-time validation: `privacy_tier="embeddings"` without an embedder raises `ValueError` (misconfig caught at load, not silent every-call degradation); a non-callable `embedder` also raises `ValueError`.
+- **`Embedder` public type alias** — `Callable[[list[str]], list[float]]`. Re-exported from `l6e.cloud`.
+- **`prompts: list[str] | None = None` kwarg on `IConstraintGate.check()`.** Forwarded automatically by `PipelineContext.advise()`. The OSS `ConstraintGate` accepts and ignores it; `RemoteConstraintGate` consumes it to invoke the embedder when the embeddings tier is active. Backward compatible: existing `IConstraintGate` implementations without the kwarg remain protocol-compliant via the default.
+- **Client-side embedding validation.** Embedder output is checked before serialization for: list-ness, non-empty, ≤ 4096 dims, no NaN / inf, no `bool` (silent True→1 promotion), no non-numeric. Mirrors the server-side `_require_embedding` contract so a single `cloud_embedding_failed` log key surfaces the failure mode rather than splitting it across the embedder fault and the eventual `cloud_authorize_5xx`.
+
+### Changed
+
+- **Iron-rule extension for the embeddings tier.** Any embedder failure (raise, NaN / inf / wrong-dim / non-list output) collapses to **metadata-tier behavior**: `request_embedding` is omitted from the cloud body, the cloud call still runs, and the cloud's decision is authoritative on the resulting `GateDecision`. **Notably, the failure does NOT stamp a `fail_open:` reason** — the cloud was reachable and made a real decision; only the privacy upgrade was lost. The operator signal is the stable `cloud_embedding_failed` log key (WARNING). Operators looking for "did embedding ever degrade in this run?" pivot on this log key, not on `GateDecision.reason`.
+- **`hashed_prompts` privacy tier still raises `NotImplementedError` at construction**, with the error message updated to point at L6E-98.
+
+### Stable log keys
+
+- `cloud_embedding_failed` (WARNING) — emitted on any embedder failure mode (exception or invalid shape). The structured `extra` carries `reason="invalid_embedding_shape"` for the validation path; exceptions carry `exc_info`.
+
 ## [0.5.0] - 2026-05-01
 
 ### Added

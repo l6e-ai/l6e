@@ -190,6 +190,11 @@ class PipelineContext:
                 user_id=user_id,
                 tenant_id=tenant_id,
                 cohort_hint=cohort_hint,
+                # Forwarded so cloud-sync gates can invoke the
+                # customer-supplied embedder when
+                # ``CloudConfig.privacy_tier="embeddings"``. The OSS
+                # ``ConstraintGate`` ignores it.
+                prompts=prompts,
             )
         except Exception:
             _logger.warning("l6e_advise_failed_fail_open", exc_info=True)

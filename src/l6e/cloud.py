@@ -32,7 +32,9 @@ import logging
 import math
 import os
 import threading
+from collections.abc import Callable
 from dataclasses import dataclass
+from numbers import Real
 from typing import Any, Literal
 
 import httpx
@@ -41,17 +43,35 @@ logger = logging.getLogger(__name__)
 
 PrivacyTier = Literal["metadata", "embeddings", "hashed_prompts"]
 
-# The only privacy tier wired up today. ``embeddings`` and
-# ``hashed_prompts`` are reserved on the public type so opt-in flags
-# don't break compatibility when they ship, but accepting them silently
-# now would be a bug surface (operator thinks they have embeddings when
-# they don't). ``CloudConfig`` therefore rejects them at construction.
-_SUPPORTED_PRIVACY_TIERS: frozenset[str] = frozenset({"metadata"})
+# Customer-supplied client-side embedder. Receives the SDK-extracted user
+# prompts (list of strings, in message order) and returns a single
+# ``list[float]`` to attach as ``request_embedding`` on the cloud
+# authorize body. Bring-your-own — l6e does not prescribe a model. The
+# customer owns pooling (mean / first-only / concat-then-embed) so they
+# can match whatever their privacy-reviewed embedder produces.
+Embedder = Callable[[list[str]], list[float]]
+
+# Privacy tiers wired up today. ``hashed_prompts`` is reserved on the
+# public type so opt-in flags don't break compatibility when L6E-98
+# ships, but accepting it silently now would be a bug surface (operator
+# thinks they have hashed prompts when they don't). ``CloudConfig``
+# therefore rejects it at construction.
+_SUPPORTED_PRIVACY_TIERS: frozenset[str] = frozenset({"metadata", "embeddings"})
 _PRIVACY_TIER_FOLLOWUP_HINT = (
-    "embeddings / hashed_prompts privacy tiers are not yet implemented "
-    "and will raise at construction. Use privacy_tier='metadata' until "
-    "client-side embedding support ships in a future release."
+    "hashed_prompts privacy tier is not yet implemented and will raise "
+    "at construction. Use privacy_tier='metadata' or "
+    "privacy_tier='embeddings' until LSH/MinHash support ships (L6E-98)."
 )
+
+# Server-side cap on embedding dimensionality (mirrored from
+# ``hosted-edge/src/relay/routers/authorize.py:_MAX_EMBEDDING_DIM``).
+# Validating client-side keeps a single ``cloud_embedding_failed``
+# fail-surface — the alternative is letting the server 400 and
+# fail-opening through the ``cloud_authorize_5xx`` path, which conflates
+# "embedder produced garbage" with "server is unhealthy" in operator
+# dashboards. Iron-rule extension: client-side validation is the right
+# place to catch bring-your-own-embedder misconfiguration.
+_MAX_EMBEDDING_DIM = 4096
 
 # Server response envelope contracts. The MCP client consumes the same
 # wire schema, so the two clients must agree on what "valid envelope"
@@ -73,8 +93,14 @@ class CloudConfig:
     cloud-sync, so we validate aggressively here:
 
     - ``timeout_s`` and ``latency_deadline_ms`` must be finite and > 0.
-    - ``privacy_tier`` outside ``metadata`` raises ``NotImplementedError``
-      pending future client-side embedding support.
+    - ``privacy_tier="hashed_prompts"`` raises ``NotImplementedError``
+      pending L6E-98.
+    - ``privacy_tier="embeddings"`` requires ``embedder`` to be set;
+      missing ``embedder`` raises ``ValueError`` at construction. This
+      is a misconfig, not a runtime fail-open: a customer who declared
+      "I want embeddings tier" but forgot the embedder would otherwise
+      silently degrade to metadata on every call, defeating the purpose
+      of the opt-in. Catch it loudly at load time.
     - ``api_key`` resolves at construction time: explicit kwarg wins,
       else ``os.environ["L6E_API_KEY"]``, else ``None``. A ``None`` key
       after resolution does *not* raise — it's logged at WARNING and
@@ -88,6 +114,11 @@ class CloudConfig:
     timeout_s: float = 0.250
     latency_deadline_ms: int = 250
     privacy_tier: PrivacyTier = "metadata"
+    # Customer-supplied client-side embedder. Required when
+    # ``privacy_tier="embeddings"``; ignored otherwise. Setting it under
+    # ``metadata`` tier is allowed (and silent) so customers can flip
+    # tiers via env without conditionally removing the embedder.
+    embedder: Embedder | None = None
 
     def __post_init__(self) -> None:
         if not isinstance(self.base_url, str) or not self.base_url.strip():
@@ -109,6 +140,18 @@ class CloudConfig:
             raise NotImplementedError(
                 f"CloudConfig.privacy_tier={self.privacy_tier!r} is not yet supported. "
                 + _PRIVACY_TIER_FOLLOWUP_HINT
+            )
+        if self.privacy_tier == "embeddings" and self.embedder is None:
+            raise ValueError(
+                "CloudConfig.privacy_tier='embeddings' requires an "
+                "embedder. Pass embedder=<callable[[list[str]], list[float]]> "
+                "or set privacy_tier='metadata'. Bring-your-own; l6e does "
+                "not prescribe an embedding model."
+            )
+        if self.embedder is not None and not callable(self.embedder):
+            raise ValueError(
+                "CloudConfig.embedder must be callable "
+                f"(got {type(self.embedder).__name__})"
             )
         # ``api_key`` resolution: explicit > env > None. We mutate via
         # ``object.__setattr__`` because the dataclass is frozen.
@@ -174,6 +217,78 @@ def _reset_client() -> None:
             with contextlib.suppress(Exception):
                 _client.close()
         _client = None
+
+
+# ---------------------------------------------------------------------------
+# Embedder invocation — fail-open to metadata-tier behavior on any failure.
+# ---------------------------------------------------------------------------
+
+
+def _validate_embedding(value: object) -> list[float] | None:
+    """Defensive shape check matching the server-side
+    ``_require_embedding`` contract (``hosted-edge/.../authorize.py``).
+
+    Returns the coerced ``list[float]`` on success or ``None`` on any
+    structural problem. Catching client-side keeps a single
+    ``cloud_embedding_failed`` fail-surface — the alternative is letting
+    the server 400 and routing through ``cloud_authorize_5xx``, which
+    conflates "embedder produced garbage" with "server is unhealthy" in
+    operator dashboards.
+
+    Rejects: non-list, empty list, > ``_MAX_EMBEDDING_DIM`` dims,
+    elements that aren't ``Real`` (or are ``bool``, since ``True/False``
+    silently coerce to 1/0 and mask wire bugs), NaN, inf.
+    """
+    if not isinstance(value, list) or not value:
+        return None
+    if len(value) > _MAX_EMBEDDING_DIM:
+        return None
+    coerced: list[float] = []
+    for item in value:
+        if isinstance(item, bool) or not isinstance(item, Real):
+            return None
+        fitem = float(item)
+        if math.isnan(fitem) or math.isinf(fitem):
+            return None
+        coerced.append(fitem)
+    return coerced
+
+
+def _safe_embed(
+    embedder: Embedder, prompts: list[str],
+) -> list[float] | None:
+    """Invoke a customer-supplied embedder and validate the result.
+
+    Returns the validated ``list[float]`` on success, or ``None`` on any
+    failure mode (embedder raised, returned non-list, returned empty,
+    too many dims, NaN / inf, non-numeric elements). Never raises into
+    caller code — the iron-rule extension for the embeddings tier:
+    any embedder failure collapses to metadata-tier behavior (the
+    ``request_embedding`` field is omitted from the cloud body), the
+    cloud call still drives the decision.
+
+    A single stable log key — ``cloud_embedding_failed`` — fires on every
+    failure. Operators pivot dashboards on this one tag rather than on a
+    family of subkeys, mirroring how ``_post_authorize`` collapses many
+    network failure modes onto a small set of greppable strings.
+    """
+    try:
+        result = embedder(prompts)
+    except Exception:
+        logger.warning("cloud_embedding_failed", exc_info=True)
+        return None
+    validated = _validate_embedding(result)
+    if validated is None:
+        # Distinguish "embedder ran but returned garbage" from "embedder
+        # raised" via the structured ``reason`` extra without a separate
+        # log key. The two failure modes route through the same
+        # fail-open path so they share the same operator surface.
+        logger.warning(
+            "cloud_embedding_failed",
+            extra={"reason": "invalid_embedding_shape"},
+        )
+        return None
+    return validated
 
 
 # ---------------------------------------------------------------------------

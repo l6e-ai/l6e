@@ -1,9 +1,10 @@
 """Tests for ``RemoteConstraintGate`` and the cloud-sync wiring (L6E-73).
 
-Covers six surfaces:
+Covers seven surfaces:
 
 1. ``CloudConfig`` validation — privacy_tier scope (Q3a), api_key
-   resolution, finite/positive timeouts, missing key fail-open posture.
+   resolution, finite/positive timeouts, missing key fail-open posture,
+   embedder construction-time validation (L6E-97 / L6E-68 absorbed).
 2. ``_sanitize_authorize_response`` — the sibling-of-MCP envelope guard
    that rejects NaN / negative / missing-action server responses.
 3. ``_post_authorize`` — every fail-open path (timeout, 5xx, bad JSON,
@@ -24,6 +25,14 @@ Covers six surfaces:
    ``ConstraintGate``. Q1(a) factor caching: server-supplied
    ``calibration_factor`` is cached on ``GateDecision`` and re-applied
    to ``CallRecord.cost_usd`` at record-time.
+7. **L6E-97: embeddings privacy tier.** ``_validate_embedding`` and
+   ``_safe_embed`` defensively coerce embedder output (rejecting NaN /
+   inf / wrong-dim / non-numeric / empty / non-list). The gate path
+   invokes the embedder when ``privacy_tier="embeddings"`` and a vector
+   reaches ``request_embedding`` verbatim; an embedder that raises or
+   returns garbage degrades to metadata-tier behavior (no
+   ``request_embedding``, cloud call still made, decision is the
+   cloud's), with a stable ``cloud_embedding_failed`` log key.
 
 Mirrors the iron-rule tests in ``mcp/tests/test_fail_open.py``. If a
 new failure mode appears here, add it there too — and vice versa.
@@ -45,7 +54,9 @@ from l6e.cloud import (
     CloudConfig,
     _post_authorize,
     _reset_client,
+    _safe_embed,
     _sanitize_authorize_response,
+    _validate_embedding,
 )
 from l6e.gate import (
     ConstraintGate,
@@ -139,11 +150,46 @@ class TestCloudConfigValidation:
             for r in caplog.records
         )
 
-    def test_embeddings_tier_raises_not_implemented(self) -> None:
-        with pytest.raises(NotImplementedError, match="not yet"):
-            CloudConfig(api_key="sk", privacy_tier="embeddings")  # type: ignore[arg-type]
+    def test_embeddings_tier_without_embedder_raises_value_error(self) -> None:
+        """L6E-97: embeddings tier ships, but it requires an embedder.
+        Forgetting the embedder is a misconfig (would silently degrade
+        to metadata on every call), not a runtime fail-open. Catch it
+        loudly at construction so customer pipelines fail at load."""
+        with pytest.raises(ValueError, match="embedder"):
+            CloudConfig(api_key="sk", privacy_tier="embeddings")
+
+    def test_embeddings_tier_with_embedder_constructs(self) -> None:
+        """L6E-97 acceptance: ``CloudConfig(privacy_tier='embeddings')``
+        constructs without raising when an embedder is provided."""
+        cfg = CloudConfig(
+            api_key="sk",
+            privacy_tier="embeddings",
+            embedder=lambda prompts: [0.1, 0.2, 0.3],
+        )
+        assert cfg.privacy_tier == "embeddings"
+        assert cfg.embedder is not None
+
+    def test_metadata_tier_with_embedder_set_is_silent(self) -> None:
+        """A customer flipping tiers via env shouldn't have to
+        conditionally remove the embedder. Setting it under
+        ``metadata`` tier is allowed and silently unused — the gate
+        only invokes the embedder when ``privacy_tier='embeddings'``."""
+        cfg = CloudConfig(
+            api_key="sk",
+            privacy_tier="metadata",
+            embedder=lambda prompts: [0.1, 0.2],
+        )
+        assert cfg.privacy_tier == "metadata"
+        assert cfg.embedder is not None
+
+    def test_non_callable_embedder_rejected(self) -> None:
+        with pytest.raises(ValueError, match="embedder"):
+            CloudConfig(api_key="sk", embedder="not-a-callable")  # type: ignore[arg-type]
 
     def test_hashed_prompts_tier_raises_not_implemented(self) -> None:
+        """L6E-98 still uncovered. Keep the NotImplementedError pointer
+        so customers who try ``hashed_prompts`` get a stable,
+        operator-greppable error pointing at the open ticket."""
         with pytest.raises(NotImplementedError, match="not yet"):
             CloudConfig(api_key="sk", privacy_tier="hashed_prompts")  # type: ignore[arg-type]
 
@@ -789,3 +835,410 @@ class TestEndToEndAcceptanceCriterion2:
         # session_id is the ctx.run_id — verifies it lands as the
         # session correlation key for ``authorize_events``.
         assert captured["session_id"] == ctx.run_id
+
+
+# ===========================================================================
+# 7. L6E-97 — embeddings privacy tier
+# ===========================================================================
+
+
+class TestValidateEmbedding:
+    """Defensive shape check that mirrors the server-side
+    ``_require_embedding`` contract. Single fail-surface: anything not
+    accepted here is exactly what the server would 400 on, but we catch
+    it locally so the operator log key is ``cloud_embedding_failed`` and
+    not ``cloud_authorize_5xx``."""
+
+    def test_accepts_valid_floats(self) -> None:
+        assert _validate_embedding([0.1, -0.2, 0.0]) == [0.1, -0.2, 0.0]
+
+    def test_accepts_ints_coerces_to_floats(self) -> None:
+        result = _validate_embedding([1, 2, 3])
+        assert result == [1.0, 2.0, 3.0]
+        assert all(isinstance(x, float) for x in result)
+
+    def test_rejects_non_list(self) -> None:
+        assert _validate_embedding((0.1, 0.2)) is None  # tuple
+        assert _validate_embedding("0.1,0.2") is None
+        assert _validate_embedding({"v": 0.1}) is None
+        assert _validate_embedding(None) is None
+
+    def test_rejects_empty_list(self) -> None:
+        assert _validate_embedding([]) is None
+
+    def test_rejects_oversized(self) -> None:
+        # _MAX_EMBEDDING_DIM is 4096; one element over should fail.
+        assert _validate_embedding([0.0] * 4097) is None
+
+    def test_accepts_at_cap(self) -> None:
+        assert _validate_embedding([0.0] * 4096) is not None
+
+    def test_rejects_nan(self) -> None:
+        assert _validate_embedding([0.1, float("nan"), 0.2]) is None
+
+    def test_rejects_inf(self) -> None:
+        assert _validate_embedding([0.1, float("inf"), 0.2]) is None
+        assert _validate_embedding([0.1, float("-inf"), 0.2]) is None
+
+    def test_rejects_bool_elements(self) -> None:
+        # ``bool`` is an ``int`` subclass; silent True→1 promotion would
+        # mask an embedder bug. Match the server's posture.
+        assert _validate_embedding([0.1, True, 0.2]) is None
+        assert _validate_embedding([False, 0.0]) is None
+
+    def test_rejects_non_numeric_elements(self) -> None:
+        assert _validate_embedding([0.1, "0.2", 0.3]) is None
+        assert _validate_embedding([0.1, None, 0.3]) is None
+        assert _validate_embedding([0.1, [0.2], 0.3]) is None
+
+
+class TestSafeEmbed:
+    """``_safe_embed`` is the iron-rule extension for the embeddings
+    tier: any embedder failure mode collapses to ``None`` (which the
+    caller treats as "omit ``request_embedding``, still POST as
+    metadata"), and emits the stable ``cloud_embedding_failed`` log key.
+    Never raises into caller code."""
+
+    def test_happy_path(self) -> None:
+        result = _safe_embed(lambda prompts: [0.1, 0.2, 0.3], ["hello"])
+        assert result == [0.1, 0.2, 0.3]
+
+    def test_embedder_raises_returns_none_logs(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        def broken(prompts: list[str]) -> list[float]:
+            raise RuntimeError("embedding model OOM")
+
+        caplog.set_level(logging.WARNING, logger="l6e.cloud")
+        assert _safe_embed(broken, ["hello"]) is None
+        assert any(
+            r.getMessage() == "cloud_embedding_failed" for r in caplog.records
+        )
+
+    def test_embedder_returns_garbage_returns_none_logs(
+        self, caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        caplog.set_level(logging.WARNING, logger="l6e.cloud")
+        # Returns a string instead of a list.
+        assert _safe_embed(
+            lambda prompts: "not-a-vector",  # type: ignore[arg-type,return-value]
+            ["hello"],
+        ) is None
+        assert any(
+            r.getMessage() == "cloud_embedding_failed" for r in caplog.records
+        )
+
+    def test_embedder_returns_nan_returns_none(self) -> None:
+        assert _safe_embed(
+            lambda prompts: [0.1, float("nan"), 0.2], ["hi"],
+        ) is None
+
+    def test_embedder_returns_oversized_returns_none(self) -> None:
+        assert _safe_embed(
+            lambda prompts: [0.0] * 4097, ["hi"],
+        ) is None
+
+    def test_embedder_receives_prompts_verbatim(self) -> None:
+        seen: list[list[str]] = []
+
+        def capture(prompts: list[str]) -> list[float]:
+            seen.append(prompts)
+            return [0.0]
+
+        _safe_embed(capture, ["first message", "second message"])
+        assert seen == [["first message", "second message"]]
+
+
+def _make_remote_gate_with_embedder(
+    cloud_cfg: CloudConfig, *, budget: float = 5.0,
+) -> RemoteConstraintGate:
+    policy = PipelinePolicy(budget=budget)
+    return RemoteConstraintGate(
+        policy=policy, router=FakeRouter(), cloud=cloud_cfg,
+    )
+
+
+class TestEmbeddingsTierGateBody:
+    """L6E-97 acceptance: a fake embedder returning ``[0.0, 1.0, ...]``
+    reaches the body verbatim; an embedder that raises falls open to
+    metadata-tier behavior (no ``request_embedding`` on the body,
+    cloud call still made, decision is the cloud's)."""
+
+    def test_fake_embedder_lands_in_body_verbatim(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+        # Embedder produces a fixed vector keyed off the prompts.
+        embedded_vector = [0.0, 1.0, 2.0, 3.0]
+        cfg = CloudConfig(
+            privacy_tier="embeddings",
+            embedder=lambda prompts: embedded_vector,
+        )
+        gate = _make_remote_gate_with_embedder(cfg)
+        store = FakeStore(budget=5.0, spent_amount=Decimal("0.0"))
+
+        with _mock_client_returning(_VALID_RESP) as patched:
+            d = gate.check(
+                store,
+                model="claude-sonnet-4",
+                estimated_cost=Decimal("0.02"),
+                stage="planning",
+                complexity=None,
+                prompts=["embed me please"],
+            )
+
+        body = patched.return_value.post.call_args.kwargs["json"]
+        assert body["request_embedding"] == embedded_vector
+        # Cloud call still drives the decision normally.
+        assert d.action == "allow"
+        assert d.calibration_source == "personal"
+
+    def test_broken_embedder_falls_open_to_metadata(
+        self,
+        monkeypatch: pytest.MonkeyPatch,
+        caplog: pytest.LogCaptureFixture,
+    ) -> None:
+        """L6E-97 iron rule: embedder failure must NOT fail the gate;
+        body omits ``request_embedding`` and we POST as metadata. The
+        cloud's decision is authoritative — no ``fail_open:`` prefix
+        on ``GateDecision.reason``, just the ``cloud_embedding_failed``
+        log key."""
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+
+        def broken_embedder(prompts: list[str]) -> list[float]:
+            raise RuntimeError("embedder crashed mid-batch")
+
+        cfg = CloudConfig(privacy_tier="embeddings", embedder=broken_embedder)
+        gate = _make_remote_gate_with_embedder(cfg)
+        store = FakeStore(budget=5.0, spent_amount=Decimal("0.0"))
+
+        caplog.set_level(logging.WARNING, logger="l6e.cloud")
+        with _mock_client_returning(_VALID_RESP) as patched:
+            d = gate.check(
+                store,
+                model="claude-sonnet-4",
+                estimated_cost=Decimal("0.02"),
+                stage="planning",
+                complexity=None,
+                prompts=["this will fail to embed"],
+            )
+
+        body = patched.return_value.post.call_args.kwargs["json"]
+        assert "request_embedding" not in body
+        # The cloud call is still made and drives the decision.
+        assert d.action == "allow"
+        # Metadata-tier behavior: NOT a local fallback. The cloud's
+        # ``calibration_source`` (here ``personal`` per ``_VALID_RESP``)
+        # wins. ``calibration_source`` is *not* ``local_fallback``.
+        assert d.calibration_source == "personal"
+        # Reason is the cloud's reason, not a fail-open prefix.
+        assert not d.reason.startswith("fail_open:")
+        # Operator-greppable signal that embedding degraded.
+        assert any(
+            r.getMessage() == "cloud_embedding_failed" for r in caplog.records
+        )
+
+    def test_garbage_embedder_falls_open_to_metadata(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """An embedder that returns NaN / oversized / non-list output
+        is treated identically to an embedder that raised — strip the
+        embedding, POST as metadata, log ``cloud_embedding_failed``."""
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+        cfg = CloudConfig(
+            privacy_tier="embeddings",
+            embedder=lambda prompts: [0.1, float("nan"), 0.3],
+        )
+        gate = _make_remote_gate_with_embedder(cfg)
+        store = FakeStore(budget=5.0, spent_amount=Decimal("0.0"))
+
+        with _mock_client_returning(_VALID_RESP) as patched:
+            gate.check(
+                store,
+                model="claude-sonnet-4",
+                estimated_cost=Decimal("0.02"),
+                stage="planning",
+                complexity=None,
+                prompts=["hello"],
+            )
+
+        body = patched.return_value.post.call_args.kwargs["json"]
+        assert "request_embedding" not in body
+
+    def test_metadata_tier_with_embedder_set_does_not_invoke_it(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``embedder=`` set on a ``metadata`` tier config must be
+        silently unused. Save the cycles and keep the wire shape pure
+        metadata."""
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+        invocations: list[list[str]] = []
+
+        def tracking_embedder(prompts: list[str]) -> list[float]:
+            invocations.append(prompts)
+            return [0.1, 0.2]
+
+        cfg = CloudConfig(
+            privacy_tier="metadata",
+            embedder=tracking_embedder,
+        )
+        gate = _make_remote_gate_with_embedder(cfg)
+        store = FakeStore(budget=5.0, spent_amount=Decimal("0.0"))
+
+        with _mock_client_returning(_VALID_RESP) as patched:
+            gate.check(
+                store,
+                model="claude-sonnet-4",
+                estimated_cost=Decimal("0.02"),
+                stage="planning",
+                complexity=None,
+                prompts=["should not be embedded"],
+            )
+
+        body = patched.return_value.post.call_args.kwargs["json"]
+        assert "request_embedding" not in body
+        assert invocations == []
+
+    def test_embeddings_tier_with_no_prompts_does_not_invoke_embedder(
+        self, monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        """``RemoteConstraintGate.check()`` may be called from a path
+        that doesn't supply prompts (legacy custom integrations).
+        Empty / missing prompts must not call the embedder with garbage
+        input — we silently degrade to metadata."""
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+        invocations: list[list[str]] = []
+
+        def tracking_embedder(prompts: list[str]) -> list[float]:
+            invocations.append(prompts)
+            return [0.1]
+
+        cfg = CloudConfig(
+            privacy_tier="embeddings", embedder=tracking_embedder,
+        )
+        gate = _make_remote_gate_with_embedder(cfg)
+        store = FakeStore(budget=5.0, spent_amount=Decimal("0.0"))
+
+        with _mock_client_returning(_VALID_RESP) as patched:
+            gate.check(
+                store,
+                model="claude-sonnet-4",
+                estimated_cost=Decimal("0.02"),
+                stage="planning",
+                complexity=None,
+                # prompts=None — the default
+            )
+
+        body = patched.return_value.post.call_args.kwargs["json"]
+        assert "request_embedding" not in body
+        assert invocations == []
+
+
+class TestEmbeddingsTierEndToEnd:
+    """L6E-97 end-to-end: ``pipeline(cloud=CloudConfig(privacy_tier=
+    'embeddings', embedder=...))`` + ``ctx.call(...)`` produces a
+    request body with ``request_embedding`` reaching ``/v1/authorize``.
+    Verifies the prompt-extraction → advise → gate.check → embedder →
+    body chain end-to-end."""
+
+    def test_call_with_embeddings_tier_sends_vector(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+    ) -> None:
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+
+        captured: dict = {}
+        embedded_vector = [0.42, -0.13, 0.88]
+
+        seen_prompts: list[list[str]] = []
+
+        def embedder(prompts: list[str]) -> list[float]:
+            seen_prompts.append(prompts)
+            return embedded_vector
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = _VALID_RESP
+        mock_resp.text = ""
+        mock_client = MagicMock()
+
+        def _capture_post(*args: Any, **kwargs: Any) -> Any:
+            captured.update(kwargs.get("json", {}))
+            return mock_resp
+
+        mock_client.post = MagicMock(side_effect=_capture_post)
+
+        with patch("l6e.cloud._get_sync_client", return_value=mock_client):
+            ctx = pipeline(
+                policy=PipelinePolicy(budget=5.0),
+                cloud=CloudConfig(
+                    privacy_tier="embeddings", embedder=embedder,
+                ),
+                log_path=tmp_path / "runs.jsonl",
+                router=FakeRouter(),
+            )
+            ctx.call(
+                lambda model, messages: _StubResponse(100, 50),
+                model="claude-sonnet-4",
+                messages=[
+                    {"role": "system", "content": "system prompt"},
+                    {"role": "user", "content": "embed this user message"},
+                ],
+                stage="planning",
+            )
+
+        assert captured["request_embedding"] == embedded_vector
+        # Prompt extraction filters to user-role only — the system
+        # prompt must NOT reach the embedder.
+        assert seen_prompts == [["embed this user message"]]
+
+    def test_call_with_broken_embedder_still_succeeds(
+        self, monkeypatch: pytest.MonkeyPatch, tmp_path: Any,
+    ) -> None:
+        """End-to-end fail-open: a broken embedder must not surface to
+        the customer's ``ctx.call`` site. The provider call still runs,
+        the body just lacks ``request_embedding``."""
+        monkeypatch.setenv("L6E_API_KEY", "sk-l6e-test")
+
+        captured: dict = {}
+
+        def broken(prompts: list[str]) -> list[float]:
+            raise RuntimeError("embedder unavailable")
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = _VALID_RESP
+        mock_resp.text = ""
+        mock_client = MagicMock()
+
+        def _capture_post(*args: Any, **kwargs: Any) -> Any:
+            captured.update(kwargs.get("json", {}))
+            return mock_resp
+
+        mock_client.post = MagicMock(side_effect=_capture_post)
+
+        provider_was_called: list[bool] = []
+
+        def provider(model: str, messages: list[dict[str, str]]) -> object:
+            provider_was_called.append(True)
+            return _StubResponse(100, 50)
+
+        with patch("l6e.cloud._get_sync_client", return_value=mock_client):
+            ctx = pipeline(
+                policy=PipelinePolicy(budget=5.0),
+                cloud=CloudConfig(
+                    privacy_tier="embeddings", embedder=broken,
+                ),
+                log_path=tmp_path / "runs.jsonl",
+                router=FakeRouter(),
+            )
+            ctx.call(
+                provider,
+                model="claude-sonnet-4",
+                messages=[{"role": "user", "content": "hi"}],
+                stage="planning",
+            )
+
+        assert "request_embedding" not in captured
+        # The customer's underlying call still happened — degrading
+        # privacy tier must never break the provider request.
+        assert provider_was_called == [True]

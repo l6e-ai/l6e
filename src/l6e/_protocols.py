@@ -67,6 +67,7 @@ class IConstraintGate(Protocol):
         user_id: str | None = None,
         tenant_id: str | None = None,
         cohort_hint: str | None = None,
+        prompts: list[str] | None = None,
     ) -> GateDecision:
         """Decide whether to allow, reroute, or halt a pending LLM call.
 
@@ -75,5 +76,13 @@ class IConstraintGate(Protocol):
         cohort-aware gates may use them to select calibrated cost factors or
         per-tenant routing policy. All three are optional and default to
         ``None`` so pre-Margin call sites remain unchanged.
+
+        ``prompts`` are the user-role prompt strings extracted from the
+        pending request. Pure ``ConstraintGate`` ignores them; the
+        cloud-sync ``RemoteConstraintGate`` consumes them when
+        ``CloudConfig.privacy_tier="embeddings"`` to invoke the
+        customer-supplied embedder before issuing the cloud call.
+        Optional and defaulted to ``None`` so pre-embeddings call sites
+        and custom gate implementations remain protocol-compliant.
         """
         ...
