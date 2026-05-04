@@ -15,14 +15,14 @@
 | src/l6e/adapters/crewai.py       |       12 |        0 |    100% |           |
 | src/l6e/adapters/langchain.py    |       58 |        0 |    100% |           |
 | src/l6e/adapters/universal.py    |        3 |        0 |    100% |           |
-| src/l6e/cloud.py                 |      131 |       21 |     84% |145-151, 156-163, 174-175, 192, 194, 217, 277-282 |
+| src/l6e/cloud.py                 |      165 |       21 |     87% |188-194, 199-206, 217-218, 307, 309, 332, 392-397 |
 | src/l6e/costs.py                 |      134 |        2 |     99% |   273-274 |
 | src/l6e/exceptions.py            |       13 |        0 |    100% |           |
-| src/l6e/gate.py                  |      105 |       12 |     89% |138-139, 300-312, 353-355, 375-377 |
-| src/l6e/pipeline.py              |      175 |        2 |     99% |   252-253 |
+| src/l6e/gate.py                  |      110 |       12 |     89% |141-142, 305-318, 377-379, 399-401 |
+| src/l6e/pipeline.py              |      175 |        2 |     99% |   257-258 |
 | src/l6e/router.py                |       30 |        0 |    100% |           |
 | src/l6e/store.py                 |       41 |        0 |    100% |           |
-| **TOTAL**                        | **1056** |   **37** | **96%** |           |
+| **TOTAL**                        | **1095** |   **37** | **97%** |           |
 
 
 ## Setup coverage badge
